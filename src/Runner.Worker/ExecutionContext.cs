@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -1302,6 +1302,24 @@ namespace GitHub.Runner.Worker
                 Trace.Info($"Write event payload to {workflowFile}");
                 File.WriteAllText(workflowFile, gitHubEvent, new UTF8Encoding(false));
                 SetGitHubContext("event_path", workflowFile);
+
+                if (string.Equals(Environment.GetEnvironmentVariable("ACTIONS_RUNNER_NO_SHARED_VOLUME"), "true", StringComparison.OrdinalIgnoreCase))
+                {
+                    var podIP = Global.Container?.ContainerIP;
+                    if (!string.IsNullOrEmpty(podIP))
+                    {
+                        try
+                        {
+                            var containerPath = "/github/workflow/event.json";
+                            Trace.Info($"Syncing event payload to workflow pod: {containerPath}");
+                            WorkflowAgentHelper.WriteFileAsync(podIP, containerPath, gitHubEvent).GetAwaiter().GetResult();
+                        }
+                        catch (Exception ex)
+                        {
+                            this.Warning($"Failed to upload event payload to workflow pod: {ex.Message}");
+                        }
+                    }
+                }
             }
         }
 

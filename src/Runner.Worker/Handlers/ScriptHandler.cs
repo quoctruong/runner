@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -282,6 +282,16 @@ namespace GitHub.Runner.Worker.Handlers
             {
                 // Script is written to local path (ie host) but executed relative to the StepHost, which may be a container
                 File.WriteAllText(scriptFilePath, contents, encoding);
+            }
+
+            if (string.Equals(System.Environment.GetEnvironmentVariable("ACTIONS_RUNNER_NO_SHARED_VOLUME"), "true", StringComparison.OrdinalIgnoreCase))
+            {
+                var podIP = ExecutionContext.Global.Container?.ContainerIP;
+                if (!string.IsNullOrEmpty(podIP))
+                {
+                    var scriptContent = IsActionStep ? contents : File.ReadAllText(scriptFilePath);
+                    await WorkflowAgentHelper.WriteFileAsync(podIP, resolvedScriptPath, scriptContent);
+                }
             }
 
             // Prepend PATH

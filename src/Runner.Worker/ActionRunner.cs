@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using GitHub.DistributedTask.ObjectTemplating;
@@ -169,7 +169,7 @@ namespace GitHub.Runner.Worker
 
             // Setup File Command Manager
             var fileCommandManager = HostContext.CreateService<IFileCommandManager>();
-            fileCommandManager.InitializeFiles(ExecutionContext, null);
+            await fileCommandManager.InitializeFilesAsync(ExecutionContext, ExecutionContext.Global.Container);
 
             // Load the inputs.
             ExecutionContext.Debug("Loading inputs");

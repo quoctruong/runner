@@ -1,17 +1,19 @@
-﻿using GitHub.DistributedTask.WebApi;
+using GitHub.DistributedTask.WebApi;
 using GitHub.Runner.Worker.Container;
 using GitHub.Runner.Common;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Threading.Tasks;
+using GitHub.Runner.Worker.Handlers;
 
 namespace GitHub.Runner.Worker
 {
     [ServiceLocator(Default = typeof(FileCommandManager))]
     public interface IFileCommandManager : IRunnerService
     {
-        void InitializeFiles(IExecutionContext context, ContainerInfo container);
+        Task InitializeFilesAsync(IExecutionContext context, ContainerInfo container);
         void ProcessFiles(IExecutionContext context, ContainerInfo container);
 
     }
@@ -39,7 +41,7 @@ namespace GitHub.Runner.Worker
             _commandExtensions = extensionManager.GetExtensions<IFileCommandExtension>() ?? new List<IFileCommandExtension>();
         }
 
-        public void InitializeFiles(IExecutionContext context, ContainerInfo container)
+        public async Task InitializeFilesAsync(IExecutionContext context, ContainerInfo container)
         {
             var oldSuffix = _fileSuffix;
             _fileSuffix = Guid.NewGuid().ToString();
@@ -57,11 +59,27 @@ namespace GitHub.Runner.Worker
 
                 var pathToSet = container != null ? container.TranslateToContainerPath(newPath) : newPath;
                 context.SetGitHubContext(fileCommand.ContextName, pathToSet);
+
+                if (string.Equals(Environment.GetEnvironmentVariable("ACTIONS_RUNNER_NO_SHARED_VOLUME"), "true", StringComparison.OrdinalIgnoreCase) && container != null)
+                {
+                    var containerPath = container.TranslateToContainerPath(newPath);
+                    var podIP = container.ContainerIP;
+                    if (!string.IsNullOrEmpty(podIP))
+                    {
+                        context.Debug($"Initializing empty file command {fileCommand.ContextName} on workflow pod: {containerPath}");
+                        await WorkflowAgentHelper.WriteFileAsync(podIP, containerPath, string.Empty);
+                    }
+                }
             }
         }
 
         public void ProcessFiles(IExecutionContext context, ContainerInfo container)
         {
+            if (string.Equals(Environment.GetEnvironmentVariable("ACTIONS_RUNNER_NO_SHARED_VOLUME"), "true", StringComparison.OrdinalIgnoreCase) && container != null)
+            {
+                SyncFileCommandsFromWorkflowPodAsync(context, container).GetAwaiter().GetResult();
+            }
+
             foreach (var fileCommand in _commandExtensions)
             {
                 try
@@ -74,6 +92,45 @@ namespace GitHub.Runner.Worker
                     context.Error(ex);
                     context.CommandResult = TaskResult.Failed;
                 }
+            }
+        }
+
+        private async Task SyncFileCommandsFromWorkflowPodAsync(IExecutionContext context, ContainerInfo container)
+        {
+            var podName = container.ContainerId;
+            if (string.IsNullOrEmpty(podName)) return;
+
+            try
+            {
+                var podIP = container.ContainerIP;
+                if (string.IsNullOrEmpty(podIP))
+                {
+                    throw new InvalidOperationException("Workflow pod IP is not available.");
+                }
+                foreach (var fileCommand in _commandExtensions)
+                {
+                    var localPath = Path.Combine(_fileCommandDirectory, fileCommand.FilePrefix + _fileSuffix);
+                    var containerPath = container.TranslateToContainerPath(localPath);
+
+                    context.Debug($"Syncing file command {fileCommand.ContextName} from workflow pod: {containerPath} -> {localPath}");
+                    try
+                    {
+                        var content = await WorkflowAgentHelper.ReadFileAsync(podIP, containerPath);
+                        if (!string.IsNullOrEmpty(content))
+                        {
+                            File.WriteAllText(localPath, content, Encoding.UTF8);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // File might not exist if the step didn't write to it, which is normal
+                        context.Debug($"Failed to sync file command {fileCommand.ContextName}: {ex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                context.Warning($"Failed to resolve workflow pod IP for file command sync: {ex.Message}");
             }
         }
 

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -208,6 +208,8 @@ namespace GitHub.Runner.Worker.Container.ContainerHooks
                 return null;
             }
 
+            string rawResponse = File.ReadAllText(input.ResponseFile);
+            Trace.Info($"HookResponse JSON content: {rawResponse}");
             T response = IOUtil.LoadObject<T>(input.ResponseFile);
             Trace.Info($"Response file for the hook script at '{HookScriptPath}' running command '{input.Command}' was processed successfully");
             IOUtil.DeleteFile(input.ResponseFile);
@@ -246,6 +248,12 @@ namespace GitHub.Runner.Worker.Container.ContainerHooks
                 jobContainer.ContainerId = containerId;
             }
 
+            var containerIP = response.Context.Container?.PodIP;
+            if (containerIP != null)
+            {
+                jobContainer.ContainerIP = containerIP;
+            }
+
             var containerNetwork = response.Context.Container?.Network;
             if (containerNetwork != null)
             {
@@ -258,6 +266,7 @@ namespace GitHub.Runner.Worker.Container.ContainerHooks
                 var responseContainerInfo = response.Context.Services[i];
                 var globalContainerInfo = serviceContainers[i];
                 globalContainerInfo.ContainerId = responseContainerInfo.Id;
+                globalContainerInfo.ContainerIP = responseContainerInfo.PodIP;
                 globalContainerInfo.ContainerNetwork = responseContainerInfo.Network;
 
                 var service = new DictionaryContextData()

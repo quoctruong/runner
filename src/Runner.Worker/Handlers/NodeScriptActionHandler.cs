@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -148,6 +148,17 @@ namespace GitHub.Runner.Worker.Handlers
 
             // Remove environment variable that may cause conflicts with the node within the runner.
             Environment.Remove("NODE_ICU_DATA"); // https://github.com/actions/runner/issues/795
+
+            if (string.Equals(System.Environment.GetEnvironmentVariable("ACTIONS_RUNNER_NO_SHARED_VOLUME"), "true", StringComparison.OrdinalIgnoreCase))
+            {
+                var podIP = ExecutionContext.Global.Container?.ContainerIP;
+                if (!string.IsNullOrEmpty(podIP))
+                {
+                    var resolvedScriptPath = StepHost.ResolvePathForStepHost(ExecutionContext, target);
+                    var scriptContent = File.ReadAllText(target);
+                    await WorkflowAgentHelper.WriteFileAsync(podIP, resolvedScriptPath, scriptContent);
+                }
+            }
 
             using (var stdoutManager = new OutputManager(ExecutionContext, ActionCommandManager))
             using (var stderrManager = new OutputManager(ExecutionContext, ActionCommandManager))

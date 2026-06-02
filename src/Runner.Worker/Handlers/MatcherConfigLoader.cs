@@ -14,79 +14,45 @@ namespace GitHub.Runner.Worker.Handlers
         public static IssueMatchersConfig Load(IExecutionContext context, string file, ContainerInfo container, IWorkflowAgentManager workflowAgentManager)
         {
             file = file?.Trim();
-            var noSharedVolume = FeatureManager.IsNoSharedVolumeEnabled();
+            ArgUtil.NotNull(container, nameof(container));
 
-            // Translate file path back from container path to check if it exists on host
-            string hostPath = file;
-            if (container != null)
-            {
-                hostPath = container.TranslateToHostPath(hostPath);
-            }
-
-            // Root the host path
-            if (!Path.IsPathRooted(hostPath))
+            // Root the container path if it is relative
+            string containerPath = file;
+            if (!Path.IsPathRooted(containerPath))
             {
                 var githubContext = context.ExpressionValues["github"] as GitHubContext;
                 ArgUtil.NotNull(githubContext, nameof(githubContext));
                 var workspace = githubContext["workspace"].ToString();
                 ArgUtil.NotNullOrEmpty(workspace, "workspace");
 
-                hostPath = Path.Combine(workspace, hostPath);
+                var hostFile = Path.Combine(workspace, containerPath);
+                containerPath = container.TranslateToContainerPath(hostFile);
             }
 
-            context.Debug($"[MatcherConfigLoader] Load file: '{file}'");
-            context.Debug($"[MatcherConfigLoader] translated hostPath: '{hostPath}', exists: {File.Exists(hostPath)}");
+            context.Debug($"[MatcherConfigLoader] Retrieving matcher config from workflow agent: {containerPath}");
 
-            // If it exists locally on the host runner, load it directly
-            if (File.Exists(hostPath))
+            string tempFile = null;
+            try
             {
-                context.Debug($"[MatcherConfigLoader] File exists on host. Loading locally.");
-                return IOUtil.LoadObject<IssueMatchersConfig>(hostPath);
+                var content = workflowAgentManager.ReadFileAsync(container.ContainerIP, containerPath).GetAwaiter().GetResult();
+                tempFile = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".json");
+                File.WriteAllText(tempFile, content);
+
+                return IOUtil.LoadObject<IssueMatchersConfig>(tempFile);
             }
-
-            if (noSharedVolume && container != null)
+            finally
             {
-                // Root the path to get containerPath
-                string containerPath = file;
-                if (!Path.IsPathRooted(containerPath))
+                if (tempFile != null && File.Exists(tempFile))
                 {
-                    var githubContext = context.ExpressionValues["github"] as GitHubContext;
-                    ArgUtil.NotNull(githubContext, nameof(githubContext));
-                    var workspace = githubContext["workspace"].ToString();
-                    ArgUtil.NotNullOrEmpty(workspace, "workspace");
-
-                    var hostFile = Path.Combine(workspace, containerPath);
-                    containerPath = container.TranslateToContainerPath(hostFile);
-                }
-
-                // Retrieve file content from workflow agent on the workflow pod
-                string tempFile = null;
-                try
-                {
-                    var content = workflowAgentManager.ReadFileAsync(container.ContainerIP, containerPath).GetAwaiter().GetResult();
-                    tempFile = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".json");
-                    File.WriteAllText(tempFile, content);
-
-                    return IOUtil.LoadObject<IssueMatchersConfig>(tempFile);
-                }
-                finally
-                {
-                    if (tempFile != null && File.Exists(tempFile))
+                    try
                     {
-                        try
-                        {
-                            File.Delete(tempFile);
-                        }
-                        catch
-                        {
-                            // Ignore cleanup errors
-                        }
+                        File.Delete(tempFile);
+                    }
+                    catch
+                    {
+                        // Ignore cleanup errors
                     }
                 }
-            }
-            else
-            {
-                return IOUtil.LoadObject<IssueMatchersConfig>(hostPath);
             }
         }
     }

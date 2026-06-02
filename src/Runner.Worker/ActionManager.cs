@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -140,7 +140,7 @@ namespace GitHub.Runner.Worker
                 executionContext.Result = TaskResult.Failed;
                 throw;
             }
-            if (!FeatureManager.IsContainerHooksEnabled(executionContext.Global.Variables))
+            if (!FeatureManager.IsContainerHooksEnabled(executionContext.Global.Variables) && !FeatureManager.IsNoSharedVolumeEnabled())
             {
                 if (state.ImagesToPull.Count > 0)
                 {

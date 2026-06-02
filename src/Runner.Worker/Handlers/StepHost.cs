@@ -175,6 +175,12 @@ namespace GitHub.Runner.Worker.Handlers
                 executionContext.Warning(warningMessage);
             }
 
+            if (FeatureManager.IsNoSharedVolumeEnabled())
+            {
+                executionContext.Debug($"Running JavaScript Action in GKE Native Pod with default external tool: {nodeExternal}");
+                return nodeExternal;
+            }
+
             if (FeatureManager.IsContainerHooksEnabled(executionContext.Global.Variables))
             {
                 if (Container.IsAlpine)

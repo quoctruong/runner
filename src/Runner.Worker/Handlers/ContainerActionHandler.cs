@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -35,6 +35,11 @@ namespace GitHub.Runner.Worker.Handlers
 #if OS_WINDOWS || OS_OSX
             throw new NotSupportedException($"Container action is only supported on Linux");
 #else
+            if (FeatureManager.IsNoSharedVolumeEnabled())
+            {
+                throw new NotSupportedException("Container actions (Docker-based actions) are not supported in GKE Native serverless workflow execution.");
+            }
+
             // Update the env dictionary.
             AddInputsToEnvironment();
 

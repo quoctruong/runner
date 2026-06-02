@@ -11,7 +11,7 @@ namespace GitHub.Runner.Worker.Handlers
 {
     internal static class MatcherConfigLoader
     {
-        public static IssueMatchersConfig Load(IExecutionContext context, string file, ContainerInfo container)
+        public static IssueMatchersConfig Load(IExecutionContext context, string file, ContainerInfo container, IWorkflowAgentManager workflowAgentManager)
         {
             file = file?.Trim();
             var noSharedVolume = FeatureManager.IsNoSharedVolumeEnabled();
@@ -63,7 +63,7 @@ namespace GitHub.Runner.Worker.Handlers
                 string tempFile = null;
                 try
                 {
-                    var content = WorkflowAgentClient.ReadFileAsync(container.ContainerIP, containerPath).GetAwaiter().GetResult();
+                    var content = workflowAgentManager.ReadFileAsync(container.ContainerIP, containerPath).GetAwaiter().GetResult();
                     tempFile = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".json");
                     File.WriteAllText(tempFile, content);
 

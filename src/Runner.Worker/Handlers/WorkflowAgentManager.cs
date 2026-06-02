@@ -8,56 +8,49 @@ using System.Threading.Tasks;
 using GitHub.Runner.Common;
 using GitHub.Runner.Worker;
 using GitHub.Runner.Worker.Container;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+using GitHub.Runner.Worker.Protos;
+using Grpc.Core;
+using Grpc.Net.Client;
 
 namespace GitHub.Runner.Worker.Handlers
 {
     public class WorkflowAgentManager : RunnerService, IWorkflowAgentManager
     {
-        public async Task WriteFileAsync(string podIP, string path, string content)
+        private WorkflowAgent.WorkflowAgentClient GetGrpcClient(string podIP)
         {
-            var requestPayload = new
-            {
-                path = path,
-                content = content
-            };
-            var json = JsonConvert.SerializeObject(requestPayload);
-
             var handler = new HttpClientHandler
             {
                 ServerCertificateCustomValidationCallback = (sender, cert, chain, sslPolicyErrors) => true
             };
 
-            using (var client = new HttpClient(handler))
+            // Establish gRPC channel via private GKE pod-to-pod routing over HTTP/2 (Port 50051)
+            var channel = GrpcChannel.ForAddress($"http://{podIP}:50051", new GrpcChannelOptions
             {
-                var stringContent = new StringContent(json, Encoding.UTF8, "application/json");
-                var response = await client.PostAsync($"http://{podIP}:8080/write-file", stringContent);
-                if (!response.IsSuccessStatusCode)
-                {
-                    var errorBody = await response.Content.ReadAsStringAsync();
-                    throw new HttpRequestException($"Failed to write file: {(int)response.StatusCode} ({response.ReasonPhrase}). Response Body: {errorBody}");
-                }
-            }
+                HttpHandler = handler
+            });
+            return new WorkflowAgent.WorkflowAgentClient(channel);
+        }
+
+        public async Task WriteFileAsync(string podIP, string path, string content)
+        {
+            var client = GetGrpcClient(podIP);
+            var request = new WriteFileRequest
+            {
+                Path = path,
+                Content = content
+            };
+            await client.WriteFileAsync(request);
         }
 
         public async Task<string> ReadFileAsync(string podIP, string path)
         {
-            var handler = new HttpClientHandler
+            var client = GetGrpcClient(podIP);
+            var request = new ReadFileRequest
             {
-                ServerCertificateCustomValidationCallback = (sender, cert, chain, sslPolicyErrors) => true
+                Path = path
             };
-
-            using (var client = new HttpClient(handler))
-            {
-                var response = await client.GetAsync($"http://{podIP}:8080/read-file?path={Uri.EscapeDataString(path)}");
-                if (!response.IsSuccessStatusCode)
-                {
-                    var errorBody = await response.Content.ReadAsStringAsync();
-                    throw new HttpRequestException($"Failed to read file: {(int)response.StatusCode} ({response.ReasonPhrase}). Response Body: {errorBody}");
-                }
-                return await response.Content.ReadAsStringAsync();
-            }
+            var response = await client.ReadFileAsync(request);
+            return response.Content;
         }
 
         public async Task<int> ExecuteAsync(
@@ -80,72 +73,45 @@ namespace GitHub.Runner.Worker.Handlers
             }
             context.Debug($"Resolved workflow pod IP: {podIP}");
 
-            var execEnvironment = new Dictionary<string, string>(environment, StringComparer.OrdinalIgnoreCase);
-            if (!string.IsNullOrEmpty(prependPath))
+            var client = GetGrpcClient(podIP);
+            var request = new ExecuteRequest
             {
-                context.Debug($"Prepending path to workflow agent execution: {prependPath}");
-                execEnvironment["ACTIONS_RUNNER_PREPEND_PATH"] = prependPath;
+                Command = fileName,
+                Arguments = arguments,
+                WorkingDirectory = workingDirectory,
+                Stdin = standardInInput ?? string.Empty,
+                PrependPath = prependPath ?? string.Empty
+            };
+
+            foreach (var env in environment)
+            {
+                request.Environment.Add(env.Key, env.Value ?? string.Empty);
             }
 
-            var execRequest = new
+            using (var call = client.Execute(request, cancellationToken: cancellationToken))
             {
-                command = fileName,
-                arguments = arguments,
-                env = execEnvironment,
-                workingDir = workingDirectory,
-                stdin = standardInInput ?? string.Empty
-            };
-            var json = JsonConvert.SerializeObject(execRequest);
-
-            var handler = new HttpClientHandler
-            {
-                ServerCertificateCustomValidationCallback = (sender, cert, chain, sslPolicyErrors) => true
-            };
-
-            using (var client = new HttpClient(handler))
-            {
-                client.Timeout = Timeout.InfiniteTimeSpan;
-                var content = new StringContent(json, Encoding.UTF8, "application/json");
-                var request = new HttpRequestMessage(HttpMethod.Post, $"http://{podIP}:8080/execute") { Content = content };
-
-                using (var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken))
+                while (await call.ResponseStream.MoveNext(cancellationToken))
                 {
-                    if (!response.IsSuccessStatusCode)
+                    var response = call.ResponseStream.Current;
+                    if (response.Stream == ExecuteResponse.Types.StreamType.Stdout)
                     {
-                        var errorBody = await response.Content.ReadAsStringAsync();
-                        throw new HttpRequestException($"Response status code does not indicate success: {(int)response.StatusCode} ({response.ReasonPhrase}). Response Body: {errorBody}");
-                    }
-                    using (var stream = await response.Content.ReadAsStreamAsync())
-                    using (var reader = new StreamReader(stream, Encoding.UTF8))
-                    {
-                        while (!reader.EndOfStream)
+                        var data = response.Data;
+                        if (data != null)
                         {
-                            var line = await reader.ReadLineAsync();
-                            if (string.IsNullOrEmpty(line)) continue;
-
-                            var chunk = JObject.Parse(line);
-                            var streamName = chunk["stream"]?.ToString();
-                            var data = chunk["data"]?.ToString();
-                            var exitCodeToken = chunk["exitCode"];
-
-                            if (exitCodeToken != null)
-                            {
-                                return exitCodeToken.Value<int>();
-                            }
-
-                            if (data != null)
-                            {
-                                data = data.TrimEnd('\r', '\n');
-                                if (string.Equals(streamName, "stdout", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    onOutput?.Invoke(data);
-                                }
-                                else if (string.Equals(streamName, "stderr", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    onError?.Invoke(data);
-                                }
-                            }
+                            onOutput?.Invoke(data.TrimEnd('\r', '\n'));
                         }
+                    }
+                    else if (response.Stream == ExecuteResponse.Types.StreamType.Stderr)
+                    {
+                        var data = response.Data;
+                        if (data != null)
+                        {
+                            onError?.Invoke(data.TrimEnd('\r', '\n'));
+                        }
+                    }
+                    else if (response.Stream == ExecuteResponse.Types.StreamType.ExitCode)
+                    {
+                        return response.ExitCode;
                     }
                 }
             }

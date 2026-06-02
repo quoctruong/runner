@@ -208,8 +208,6 @@ namespace GitHub.Runner.Worker.Container.ContainerHooks
                 return null;
             }
 
-            string rawResponse = File.ReadAllText(input.ResponseFile);
-            Trace.Info($"HookResponse JSON content: {rawResponse}");
             T response = IOUtil.LoadObject<T>(input.ResponseFile);
             Trace.Info($"Response file for the hook script at '{HookScriptPath}' running command '{input.Command}' was processed successfully");
             IOUtil.DeleteFile(input.ResponseFile);

@@ -79,7 +79,7 @@ namespace GitHub.Runner.Worker
 
             // Setup file commands
             var fileCommandManager = HostContext.CreateService<IFileCommandManager>();
-            await fileCommandManager.InitializeFilesAsync(executionContext, executionContext.Global.Container);
+            fileCommandManager.InitializeFiles(executionContext, executionContext.Global.Container);
 
             // Run the step and process the file commands
             try

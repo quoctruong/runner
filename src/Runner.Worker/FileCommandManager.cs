@@ -13,9 +13,8 @@ namespace GitHub.Runner.Worker
     [ServiceLocator(Default = typeof(FileCommandManager))]
     public interface IFileCommandManager : IRunnerService
     {
-        Task InitializeFilesAsync(IExecutionContext context, ContainerInfo container);
+        void InitializeFiles(IExecutionContext context, ContainerInfo container);
         void ProcessFiles(IExecutionContext context, ContainerInfo container);
-
     }
 
     public sealed class FileCommandManager : RunnerService, IFileCommandManager
@@ -41,7 +40,7 @@ namespace GitHub.Runner.Worker
             _commandExtensions = extensionManager.GetExtensions<IFileCommandExtension>() ?? new List<IFileCommandExtension>();
         }
 
-        public async Task InitializeFilesAsync(IExecutionContext context, ContainerInfo container)
+        public void InitializeFiles(IExecutionContext context, ContainerInfo container)
         {
             var oldSuffix = _fileSuffix;
             _fileSuffix = Guid.NewGuid().ToString();
@@ -61,7 +60,7 @@ namespace GitHub.Runner.Worker
                 context.SetGitHubContext(fileCommand.ContextName, pathToSet);
 
                 var workflowAgentManager = HostContext.GetService<IWorkflowAgentManager>();
-                await workflowAgentManager.InitializeFileCommandAsync(context, container, newPath, fileCommand.ContextName);
+                workflowAgentManager.InitializeFileCommand(context, container, newPath, fileCommand.ContextName);
             }
         }
 

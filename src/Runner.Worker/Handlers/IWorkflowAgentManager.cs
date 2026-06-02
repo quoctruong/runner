@@ -10,7 +10,7 @@ namespace GitHub.Runner.Worker.Handlers
     {
         bool IsNoSharedVolumeEnabled();
         Task SyncWebhookPayloadAsync(IExecutionContext context, string localFilePath, string content);
-        Task InitializeFileCommandAsync(IExecutionContext context, ContainerInfo container, string hostPath, string contextName);
+        void InitializeFileCommand(IExecutionContext context, ContainerInfo container, string hostPath, string contextName);
         Task SyncFileCommandsFromWorkflowPodAsync(IExecutionContext context, ContainerInfo container, string fileCommandDirectory, string fileSuffix, IEnumerable<IFileCommandExtension> commandExtensions);
         Task SyncFileToWorkflowPodAsync(IExecutionContext context, string hostPath);
     }

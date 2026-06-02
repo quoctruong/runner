@@ -169,7 +169,7 @@ namespace GitHub.Runner.Worker
 
             // Setup File Command Manager
             var fileCommandManager = HostContext.CreateService<IFileCommandManager>();
-            await fileCommandManager.InitializeFilesAsync(ExecutionContext, ExecutionContext.Global.Container);
+            fileCommandManager.InitializeFiles(ExecutionContext, ExecutionContext.Global.Container);
 
             // Load the inputs.
             ExecutionContext.Debug("Loading inputs");

@@ -35,7 +35,7 @@ namespace GitHub.Runner.Worker.Handlers
             }
         }
 
-        public async Task InitializeFileCommandAsync(IExecutionContext context, ContainerInfo container, string hostPath, string contextName)
+        public void InitializeFileCommand(IExecutionContext context, ContainerInfo container, string hostPath, string contextName)
         {
             if (!IsNoSharedVolumeEnabled() || container == null) return;
 
@@ -46,7 +46,7 @@ namespace GitHub.Runner.Worker.Handlers
                 try
                 {
                     context.Debug($"Initializing empty file command {contextName} on workflow pod: {containerPath}");
-                    await WorkflowAgentHelper.WriteFileAsync(podIP, containerPath, string.Empty);
+                    WorkflowAgentHelper.WriteFileAsync(podIP, containerPath, string.Empty).GetAwaiter().GetResult();
                 }
                 catch (Exception ex)
                 {

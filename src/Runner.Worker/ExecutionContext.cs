@@ -1303,23 +1303,8 @@ namespace GitHub.Runner.Worker
                 File.WriteAllText(workflowFile, gitHubEvent, new UTF8Encoding(false));
                 SetGitHubContext("event_path", workflowFile);
 
-                if (string.Equals(Environment.GetEnvironmentVariable("ACTIONS_RUNNER_NO_SHARED_VOLUME"), "true", StringComparison.OrdinalIgnoreCase))
-                {
-                    var podIP = Global.Container?.ContainerIP;
-                    if (!string.IsNullOrEmpty(podIP))
-                    {
-                        try
-                        {
-                            var containerPath = "/github/workflow/event.json";
-                            Trace.Info($"Syncing event payload to workflow pod: {containerPath}");
-                            WorkflowAgentHelper.WriteFileAsync(podIP, containerPath, gitHubEvent).GetAwaiter().GetResult();
-                        }
-                        catch (Exception ex)
-                        {
-                            this.Warning($"Failed to upload event payload to workflow pod: {ex.Message}");
-                        }
-                    }
-                }
+                var workflowAgentManager = HostContext.GetService<IWorkflowAgentManager>();
+                workflowAgentManager.SyncWebhookPayloadAsync(this, workflowFile, gitHubEvent).GetAwaiter().GetResult();
             }
         }
 

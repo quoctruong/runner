@@ -489,33 +489,33 @@ namespace GitHub.Runner.Worker
                 return;
             }
 
-            IssueMatchersConfig config;
-            if (FeatureManager.IsNoSharedVolumeEnabled())
+            // Translate file path back from container path to host path
+            string hostPath = file;
+            if (container != null)
+            {
+                hostPath = container.TranslateToHostPath(hostPath);
+            }
+
+            // Root the host path
+            if (!Path.IsPathRooted(hostPath))
+            {
+                var githubContext = context.ExpressionValues["github"] as GitHubContext;
+                ArgUtil.NotNull(githubContext, nameof(githubContext));
+                var workspace = githubContext["workspace"].ToString();
+                ArgUtil.NotNullOrEmpty(workspace, "workspace");
+
+                hostPath = Path.Combine(workspace, hostPath);
+            }
+
+            IssueMatchersConfig config = null;
+            if (!File.Exists(hostPath) && FeatureManager.IsNoSharedVolumeEnabled() && container != null)
             {
                 var workflowAgentManager = HostContext.GetService<IWorkflowAgentManager>();
                 config = MatcherConfigLoader.Load(context, file, container, workflowAgentManager);
             }
             else
             {
-                // Translate file path back from container path
-                if (container != null)
-                {
-                    file = container.TranslateToHostPath(file);
-                }
-
-                // Root the path
-                if (!Path.IsPathRooted(file))
-                {
-                    var githubContext = context.ExpressionValues["github"] as GitHubContext;
-                    ArgUtil.NotNull(githubContext, nameof(githubContext));
-                    var workspace = githubContext["workspace"].ToString();
-                    ArgUtil.NotNullOrEmpty(workspace, "workspace");
-
-                    file = Path.Combine(workspace, file);
-                }
-
-                // Load the config
-                config = IOUtil.LoadObject<IssueMatchersConfig>(file);
+                config = IOUtil.LoadObject<IssueMatchersConfig>(hostPath);
             }
 
             // Add
@@ -561,33 +561,33 @@ namespace GitHub.Runner.Worker
             // Remove by file
             else
             {
-                IssueMatchersConfig config;
-                if (FeatureManager.IsNoSharedVolumeEnabled())
+                // Translate file path back from container path to host path
+                string hostPath = file;
+                if (container != null)
+                {
+                    hostPath = container.TranslateToHostPath(hostPath);
+                }
+
+                // Root the host path
+                if (!Path.IsPathRooted(hostPath))
+                {
+                    var githubContext = context.ExpressionValues["github"] as GitHubContext;
+                    ArgUtil.NotNull(githubContext, nameof(githubContext));
+                    var workspace = githubContext["workspace"].ToString();
+                    ArgUtil.NotNullOrEmpty(workspace, "workspace");
+
+                    hostPath = Path.Combine(workspace, hostPath);
+                }
+
+                IssueMatchersConfig config = null;
+                if (!File.Exists(hostPath) && FeatureManager.IsNoSharedVolumeEnabled() && container != null)
                 {
                     var workflowAgentManager = HostContext.GetService<IWorkflowAgentManager>();
                     config = MatcherConfigLoader.Load(context, file, container, workflowAgentManager);
                 }
                 else
                 {
-                    // Translate file path back from container path
-                    if (container != null)
-                    {
-                        file = container.TranslateToHostPath(file);
-                    }
-
-                    // Root the path
-                    if (!Path.IsPathRooted(file))
-                    {
-                        var githubContext = context.ExpressionValues["github"] as GitHubContext;
-                        ArgUtil.NotNull(githubContext, nameof(githubContext));
-                        var workspace = githubContext["workspace"].ToString();
-                        ArgUtil.NotNullOrEmpty(workspace, "workspace");
-
-                        file = Path.Combine(workspace, file);
-                    }
-
-                    // Load the config
-                    config = IOUtil.LoadObject<IssueMatchersConfig>(file);
+                    config = IOUtil.LoadObject<IssueMatchersConfig>(hostPath);
                 }
 
                 if (config?.Matchers?.Count > 0)

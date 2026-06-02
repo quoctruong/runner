@@ -31,6 +31,17 @@ namespace GitHub.Runner.Worker.Handlers
             return new WorkflowAgent.WorkflowAgentClient(channel);
         }
 
+        private Metadata GetHeaders()
+        {
+            var headers = new Metadata();
+            var token = Environment.GetEnvironmentVariable(Constants.Variables.Actions.SecurityToken);
+            if (!string.IsNullOrEmpty(token))
+            {
+                headers.Add("x-actions-runner-token", token);
+            }
+            return headers;
+        }
+
         public async Task WriteFileAsync(string podIP, string path, string content)
         {
             var client = GetGrpcClient(podIP);
@@ -39,7 +50,7 @@ namespace GitHub.Runner.Worker.Handlers
                 Path = path,
                 Content = content
             };
-            await client.WriteFileAsync(request);
+            await client.WriteFileAsync(request, headers: GetHeaders());
         }
 
         public async Task<string> ReadFileAsync(string podIP, string path)
@@ -49,7 +60,7 @@ namespace GitHub.Runner.Worker.Handlers
             {
                 Path = path
             };
-            var response = await client.ReadFileAsync(request);
+            var response = await client.ReadFileAsync(request, headers: GetHeaders());
             return response.Content;
         }
 
@@ -88,7 +99,7 @@ namespace GitHub.Runner.Worker.Handlers
                 request.Environment.Add(env.Key, env.Value ?? string.Empty);
             }
 
-            using (var call = client.Execute(request, cancellationToken: cancellationToken))
+            using (var call = client.Execute(request, headers: GetHeaders(), cancellationToken: cancellationToken))
             {
                 while (await call.ResponseStream.MoveNext(cancellationToken))
                 {

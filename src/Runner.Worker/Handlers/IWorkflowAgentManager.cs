@@ -8,7 +8,6 @@ namespace GitHub.Runner.Worker.Handlers
     [ServiceLocator(Default = typeof(WorkflowAgentManager))]
     public interface IWorkflowAgentManager : IRunnerService
     {
-        bool IsNoSharedVolumeEnabled();
         Task SyncWebhookPayloadAsync(IExecutionContext context, string localFilePath, string content);
         void InitializeFileCommand(IExecutionContext context, ContainerInfo container, string hostPath, string contextName);
         Task SyncFileCommandsFromWorkflowPodAsync(IExecutionContext context, ContainerInfo container, string fileCommandDirectory, string fileSuffix, IEnumerable<IFileCommandExtension> commandExtensions);

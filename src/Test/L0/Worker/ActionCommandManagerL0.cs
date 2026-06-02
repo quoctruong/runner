@@ -452,7 +452,7 @@ namespace GitHub.Runner.Common.Tests.Worker
     ]
 }";
                     var readFileCalled = false;
-                    WorkflowAgentHelper.ReadFileDelegate = (ip, path) =>
+                    WorkflowAgentClient.ReadFileDelegate = (ip, path) =>
                     {
                         readFileCalled = true;
                         Assert.Equal("10.0.0.1", ip);
@@ -471,7 +471,7 @@ namespace GitHub.Runner.Common.Tests.Worker
             finally
             {
                 Environment.SetEnvironmentVariable(Constants.Variables.Actions.NoSharedVolume, originNoSharedVolume);
-                WorkflowAgentHelper.ReadFileDelegate = null;
+                WorkflowAgentClient.ReadFileDelegate = null;
             }
         }
 
@@ -516,7 +516,7 @@ namespace GitHub.Runner.Common.Tests.Worker
                     container.AddPathTranslateMapping(hostDirectory, containerDirectory);
 
                     var readFileCalled = false;
-                    WorkflowAgentHelper.ReadFileDelegate = (ip, path) =>
+                    WorkflowAgentClient.ReadFileDelegate = (ip, path) =>
                     {
                         readFileCalled = true;
                         return System.Threading.Tasks.Task.FromResult(string.Empty);
@@ -533,7 +533,7 @@ namespace GitHub.Runner.Common.Tests.Worker
             finally
             {
                 Environment.SetEnvironmentVariable(Constants.Variables.Actions.NoSharedVolume, originNoSharedVolume);
-                WorkflowAgentHelper.ReadFileDelegate = null;
+                WorkflowAgentClient.ReadFileDelegate = null;
             }
         }
 
@@ -578,7 +578,7 @@ namespace GitHub.Runner.Common.Tests.Worker
                     container.AddPathTranslateMapping(hostDirectory, containerDirectory);
 
                     var readFileCalled = false;
-                    WorkflowAgentHelper.ReadFileDelegate = (ip, path) =>
+                    WorkflowAgentClient.ReadFileDelegate = (ip, path) =>
                     {
                         readFileCalled = true;
                         return System.Threading.Tasks.Task.FromResult(string.Empty);
@@ -595,7 +595,7 @@ namespace GitHub.Runner.Common.Tests.Worker
             finally
             {
                 Environment.SetEnvironmentVariable(Constants.Variables.Actions.NoSharedVolume, originNoSharedVolume);
-                WorkflowAgentHelper.ReadFileDelegate = null;
+                WorkflowAgentClient.ReadFileDelegate = null;
             }
         }
 

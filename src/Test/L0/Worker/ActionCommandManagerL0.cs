@@ -658,6 +658,10 @@ namespace GitHub.Runner.Common.Tests.Worker
             _pipelineDirectoryManager = new Mock<IPipelineDirectoryManager>();
             hostContext.SetSingleton<IPipelineDirectoryManager>(_pipelineDirectoryManager.Object);
 
+            // Mock workflow agent manager
+            var mockWorkflowAgentManager = new Mock<IWorkflowAgentManager>();
+            hostContext.SetSingleton<IWorkflowAgentManager>(mockWorkflowAgentManager.Object);
+
             // Execution context
             _ec = new Mock<IExecutionContext>();
             _ec.SetupAllProperties();

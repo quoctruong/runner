@@ -284,15 +284,10 @@ namespace GitHub.Runner.Worker.Handlers
                 File.WriteAllText(scriptFilePath, contents, encoding);
             }
 
-            if (string.Equals(System.Environment.GetEnvironmentVariable("ACTIONS_RUNNER_NO_SHARED_VOLUME"), "true", StringComparison.OrdinalIgnoreCase))
-            {
-                var podIP = ExecutionContext.Global.Container?.ContainerIP;
-                if (!string.IsNullOrEmpty(podIP))
-                {
-                    var scriptContent = IsActionStep ? contents : File.ReadAllText(scriptFilePath);
-                    await WorkflowAgentHelper.WriteFileAsync(podIP, resolvedScriptPath, scriptContent);
-                }
-            }
+            var workflowAgentManager = HostContext.GetService<IWorkflowAgentManager>();
+            await workflowAgentManager.SyncFileToWorkflowPodAsync(ExecutionContext, scriptFilePath);
+
+
 
             // Prepend PATH
             AddPrependPathToEnvironment();

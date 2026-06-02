@@ -225,7 +225,8 @@ namespace GitHub.Runner.Worker.Handlers
             if (FeatureManager.IsNoSharedVolumeEnabled())
             {
                 TranslateToContainerPath(environment);
-                return await WorkflowAgentClient.ExecuteAsync(
+                var workflowAgentManager = HostContext.GetService<IWorkflowAgentManager>();
+                return await workflowAgentManager.ExecuteAsync(
                     context,
                     Container,
                     workingDirectory,

@@ -451,27 +451,23 @@ namespace GitHub.Runner.Common.Tests.Worker
         }
     ]
 }";
-                    var readFileCalled = false;
-                    WorkflowAgentClient.ReadFileDelegate = (ip, path) =>
-                    {
-                        readFileCalled = true;
-                        Assert.Equal("10.0.0.1", ip);
-                        Assert.Equal(containerFile, path);
-                        return System.Threading.Tasks.Task.FromResult(content);
-                    };
+                    var mockWorkflowAgentManager = new Mock<IWorkflowAgentManager>();
+                    mockWorkflowAgentManager
+                        .Setup(x => x.ReadFileAsync("10.0.0.1", containerFile))
+                        .ReturnsAsync(content);
+                    hc.SetSingleton<IWorkflowAgentManager>(mockWorkflowAgentManager.Object);
 
                     // Act
                     _commandManager.TryProcessCommand(_ec.Object, $"::add-matcher::{containerFile}", container);
 
                     // Assert
-                    Assert.True(readFileCalled);
+                    mockWorkflowAgentManager.Verify(x => x.ReadFileAsync("10.0.0.1", containerFile), Times.Once);
                     _ec.Verify(x => x.AddMatchers(It.IsAny<IssueMatchersConfig>()), Times.Once);
                 }
             }
             finally
             {
                 Environment.SetEnvironmentVariable(Constants.Variables.Actions.NoSharedVolume, originNoSharedVolume);
-                WorkflowAgentClient.ReadFileDelegate = null;
             }
         }
 
@@ -515,25 +511,20 @@ namespace GitHub.Runner.Common.Tests.Worker
                     var containerFile = Path.Combine(containerDirectory, "my-matcher.json");
                     container.AddPathTranslateMapping(hostDirectory, containerDirectory);
 
-                    var readFileCalled = false;
-                    WorkflowAgentClient.ReadFileDelegate = (ip, path) =>
-                    {
-                        readFileCalled = true;
-                        return System.Threading.Tasks.Task.FromResult(string.Empty);
-                    };
+                    var mockWorkflowAgentManager = new Mock<IWorkflowAgentManager>();
+                    hc.SetSingleton<IWorkflowAgentManager>(mockWorkflowAgentManager.Object);
 
                     // Act
                     _commandManager.TryProcessCommand(_ec.Object, $"::add-matcher::{containerFile}", container);
 
                     // Assert
-                    Assert.False(readFileCalled);
+                    mockWorkflowAgentManager.Verify(x => x.ReadFileAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
                     _ec.Verify(x => x.AddMatchers(It.IsAny<IssueMatchersConfig>()), Times.Once);
                 }
             }
             finally
             {
                 Environment.SetEnvironmentVariable(Constants.Variables.Actions.NoSharedVolume, originNoSharedVolume);
-                WorkflowAgentClient.ReadFileDelegate = null;
             }
         }
 
@@ -577,25 +568,20 @@ namespace GitHub.Runner.Common.Tests.Worker
                     var containerFile = Path.Combine(containerDirectory, "my-matcher.json");
                     container.AddPathTranslateMapping(hostDirectory, containerDirectory);
 
-                    var readFileCalled = false;
-                    WorkflowAgentClient.ReadFileDelegate = (ip, path) =>
-                    {
-                        readFileCalled = true;
-                        return System.Threading.Tasks.Task.FromResult(string.Empty);
-                    };
+                    var mockWorkflowAgentManager = new Mock<IWorkflowAgentManager>();
+                    hc.SetSingleton<IWorkflowAgentManager>(mockWorkflowAgentManager.Object);
 
                     // Act - passing path with trailing carriage return and newline
                     _commandManager.TryProcessCommand(_ec.Object, $"::add-matcher::{containerFile}\r\n", container);
 
                     // Assert
-                    Assert.False(readFileCalled);
+                    mockWorkflowAgentManager.Verify(x => x.ReadFileAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
                     _ec.Verify(x => x.AddMatchers(It.IsAny<IssueMatchersConfig>()), Times.Once);
                 }
             }
             finally
             {
                 Environment.SetEnvironmentVariable(Constants.Variables.Actions.NoSharedVolume, originNoSharedVolume);
-                WorkflowAgentClient.ReadFileDelegate = null;
             }
         }
 

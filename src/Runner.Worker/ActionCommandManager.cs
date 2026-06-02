@@ -489,7 +489,8 @@ namespace GitHub.Runner.Worker
                 return;
             }
 
-            var config = MatcherConfigLoader.Load(context, file, container);
+            var workflowAgentManager = HostContext.GetService<IWorkflowAgentManager>();
+            var config = MatcherConfigLoader.Load(context, file, container, workflowAgentManager);
 
             // Add
             if (config?.Matchers?.Count > 0)
@@ -534,7 +535,8 @@ namespace GitHub.Runner.Worker
             // Remove by file
             else
             {
-                var config = MatcherConfigLoader.Load(context, file, container);
+                var workflowAgentManager = HostContext.GetService<IWorkflowAgentManager>();
+                var config = MatcherConfigLoader.Load(context, file, container, workflowAgentManager);
 
                 if (config?.Matchers?.Count > 0)
                 {

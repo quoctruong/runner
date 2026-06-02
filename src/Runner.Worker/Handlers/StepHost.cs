@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using GitHub.Runner.Worker.Container;
 using GitHub.Runner.Common;
 using GitHub.Runner.Sdk;
+using GitHub.Runner.Worker;
 using System.Linq;
 using GitHub.Runner.Worker.Container.ContainerHooks;
 using System.Threading.Channels;
@@ -221,10 +222,10 @@ namespace GitHub.Runner.Worker.Handlers
                                             CancellationToken cancellationToken)
         {
             ArgUtil.NotNull(Container, nameof(Container));
-            if (string.Equals(Environment.GetEnvironmentVariable(Constants.Variables.Actions.NoSharedVolume), "true", StringComparison.OrdinalIgnoreCase))
+            if (FeatureManager.IsNoSharedVolumeEnabled())
             {
                 TranslateToContainerPath(environment);
-                return await WorkflowAgentExecutor.ExecuteAsync(
+                return await WorkflowAgentClient.ExecuteAsync(
                     context,
                     Container,
                     workingDirectory,

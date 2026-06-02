@@ -287,8 +287,6 @@ namespace GitHub.Runner.Worker.Handlers
             var workflowAgentManager = HostContext.GetService<IWorkflowAgentManager>();
             await workflowAgentManager.SyncFileToWorkflowPodAsync(ExecutionContext, scriptFilePath);
 
-
-
             // Prepend PATH
             AddPrependPathToEnvironment();
 

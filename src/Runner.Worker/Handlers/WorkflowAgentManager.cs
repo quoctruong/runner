@@ -4,20 +4,16 @@ using System.IO;
 using System.Text;
 using System.Threading.Tasks;
 using GitHub.Runner.Common;
+using GitHub.Runner.Worker;
 using GitHub.Runner.Worker.Container;
 
 namespace GitHub.Runner.Worker.Handlers
 {
     public class WorkflowAgentManager : RunnerService, IWorkflowAgentManager
     {
-        public bool IsNoSharedVolumeEnabled()
-        {
-            return string.Equals(Environment.GetEnvironmentVariable(Constants.Variables.Actions.NoSharedVolume), "true", StringComparison.OrdinalIgnoreCase);
-        }
-
         public async Task SyncWebhookPayloadAsync(IExecutionContext context, string localFilePath, string content)
         {
-            if (!IsNoSharedVolumeEnabled()) return;
+            if (!FeatureManager.IsNoSharedVolumeEnabled()) return;
 
             var podIP = context.Global.Container?.ContainerIP;
             if (!string.IsNullOrEmpty(podIP))
@@ -26,7 +22,7 @@ namespace GitHub.Runner.Worker.Handlers
                 {
                     var containerPath = "/github/workflow/event.json";
                     context.Debug($"Syncing event payload to workflow pod: {containerPath}");
-                    await WorkflowAgentHelper.WriteFileAsync(podIP, containerPath, content);
+                    await WorkflowAgentClient.WriteFileAsync(podIP, containerPath, content);
                 }
                 catch (Exception ex)
                 {
@@ -37,7 +33,7 @@ namespace GitHub.Runner.Worker.Handlers
 
         public void InitializeFileCommand(IExecutionContext context, ContainerInfo container, string hostPath, string contextName)
         {
-            if (!IsNoSharedVolumeEnabled() || container == null) return;
+            if (!FeatureManager.IsNoSharedVolumeEnabled() || container == null) return;
 
             var containerPath = container.TranslateToContainerPath(hostPath);
             var podIP = container.ContainerIP;
@@ -46,7 +42,7 @@ namespace GitHub.Runner.Worker.Handlers
                 try
                 {
                     context.Debug($"Initializing empty file command {contextName} on workflow pod: {containerPath}");
-                    WorkflowAgentHelper.WriteFileAsync(podIP, containerPath, string.Empty).GetAwaiter().GetResult();
+                    WorkflowAgentClient.WriteFileAsync(podIP, containerPath, string.Empty).GetAwaiter().GetResult();
                 }
                 catch (Exception ex)
                 {
@@ -62,7 +58,7 @@ namespace GitHub.Runner.Worker.Handlers
             string fileSuffix,
             IEnumerable<IFileCommandExtension> commandExtensions)
         {
-            if (!IsNoSharedVolumeEnabled() || container == null) return;
+            if (!FeatureManager.IsNoSharedVolumeEnabled() || container == null) return;
 
             var podName = container.ContainerId;
             if (string.IsNullOrEmpty(podName)) return;
@@ -82,7 +78,7 @@ namespace GitHub.Runner.Worker.Handlers
                 context.Debug($"Syncing file command {fileCommand.ContextName} from workflow pod: {containerPath} -> {localPath}");
                 try
                 {
-                    var content = await WorkflowAgentHelper.ReadFileAsync(podIP, containerPath);
+                    var content = await WorkflowAgentClient.ReadFileAsync(podIP, containerPath);
                     if (!string.IsNullOrEmpty(content))
                     {
                         File.WriteAllText(localPath, content, Encoding.UTF8);
@@ -98,14 +94,14 @@ namespace GitHub.Runner.Worker.Handlers
 
         public async Task SyncFileToWorkflowPodAsync(IExecutionContext context, string hostPath)
         {
-            if (!IsNoSharedVolumeEnabled()) return;
+            if (!FeatureManager.IsNoSharedVolumeEnabled()) return;
 
             var podIP = context.Global.Container?.ContainerIP;
             if (!string.IsNullOrEmpty(podIP) && context.Global.Container != null)
             {
                 var resolvedScriptPath = context.Global.Container.TranslateToContainerPath(hostPath);
                 var scriptContent = File.ReadAllText(hostPath);
-                await WorkflowAgentHelper.WriteFileAsync(podIP, resolvedScriptPath, scriptContent);
+                await WorkflowAgentClient.WriteFileAsync(podIP, resolvedScriptPath, scriptContent);
             }
         }
     }

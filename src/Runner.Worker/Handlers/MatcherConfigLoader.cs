@@ -4,6 +4,7 @@ using GitHub.DistributedTask.Pipelines.ContextData;
 using GitHub.Runner.Common;
 using GitHub.Runner.Common.Util;
 using GitHub.Runner.Sdk;
+using GitHub.Runner.Worker;
 using GitHub.Runner.Worker.Container;
 
 namespace GitHub.Runner.Worker.Handlers
@@ -13,7 +14,7 @@ namespace GitHub.Runner.Worker.Handlers
         public static IssueMatchersConfig Load(IExecutionContext context, string file, ContainerInfo container)
         {
             file = file?.Trim();
-            var noSharedVolume = string.Equals(Environment.GetEnvironmentVariable(Constants.Variables.Actions.NoSharedVolume), "true", StringComparison.OrdinalIgnoreCase);
+            var noSharedVolume = FeatureManager.IsNoSharedVolumeEnabled();
 
             // Translate file path back from container path to check if it exists on host
             string hostPath = file;
@@ -62,7 +63,7 @@ namespace GitHub.Runner.Worker.Handlers
                 string tempFile = null;
                 try
                 {
-                    var content = WorkflowAgentHelper.ReadFileAsync(container.ContainerIP, containerPath).GetAwaiter().GetResult();
+                    var content = WorkflowAgentClient.ReadFileAsync(container.ContainerIP, containerPath).GetAwaiter().GetResult();
                     tempFile = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".json");
                     File.WriteAllText(tempFile, content);
 

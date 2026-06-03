@@ -16,6 +16,8 @@ namespace GitHub.Runner.Worker.Handlers
 {
     public class WorkflowAgentManager : RunnerService, IWorkflowAgentManager
     {
+        private readonly HashSet<string> _syncedDirectories = new(StringComparer.OrdinalIgnoreCase);
+
         private WorkflowAgent.WorkflowAgentClient GetGrpcClient(string podIP)
         {
             var agentPort = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_WORKFLOW_AGENT_PORT") ?? "50051";
@@ -216,6 +218,81 @@ namespace GitHub.Runner.Worker.Handlers
                 var resolvedScriptPath = context.Global.Container.TranslateToContainerPath(hostPath);
                 var scriptContent = File.ReadAllText(hostPath);
                 await WriteFileAsync(podIP, resolvedScriptPath, scriptContent);
+            }
+        }
+
+        public async Task SyncDirectoryToWorkflowPodAsync(IExecutionContext context, string hostDirectory)
+        {
+            if (!FeatureManager.IsNoSharedVolumeEnabled())
+            {
+                context.Debug("Bypassing directory sync to workflow pod because shared volume feature is enabled (no-shared-volume is false).");
+                return;
+            }
+            if (!Directory.Exists(hostDirectory))
+            {
+                context.Warning($"Directory sync skipped: host directory '{hostDirectory}' does not exist.");
+                return;
+            }
+
+            var normalizedDirectory = Path.GetFullPath(hostDirectory);
+            var actionsDir = Path.GetFullPath(HostContext.GetDirectory(WellKnownDirectory.Actions));
+
+            // Only cache/skip sync if it's an immutable third-party action under the '_actions/' directory
+            bool isImmutableAction = normalizedDirectory.StartsWith(actionsDir, StringComparison.OrdinalIgnoreCase);
+            context.Debug($"SyncDirectoryToWorkflowPodAsync starting: hostDirectory='{hostDirectory}' (normalized='{normalizedDirectory}'), isImmutableAction={isImmutableAction}");
+
+            if (isImmutableAction)
+            {
+                lock (_syncedDirectories)
+                {
+                    if (_syncedDirectories.Contains(normalizedDirectory))
+                    {
+                        context.Debug($"Directory {normalizedDirectory} has already been synced to the workflow pod. Skipping.");
+                        return;
+                    }
+                    _syncedDirectories.Add(normalizedDirectory);
+                }
+            }
+
+            var podIP = context.Global.Container?.ContainerIP;
+            if (string.IsNullOrEmpty(podIP) || context.Global.Container == null)
+            {
+                context.Warning($"Directory sync aborted: Workflow pod IP or container is not available. podIP='{podIP ?? "null"}', containerExists={context.Global.Container != null}");
+                return;
+            }
+
+            var files = Directory.GetFiles(hostDirectory, "*", SearchOption.AllDirectories);
+            context.Debug($"Found {files.Length} files under '{hostDirectory}' to sync to workflow pod IP '{podIP}'.");
+
+            var tasks = new List<Task>();
+            foreach (var filePath in files)
+            {
+                var resolvedPath = context.Global.Container.TranslateToContainerPath(filePath);
+                tasks.Add(Task.Run(async () =>
+                {
+                    try
+                    {
+                        context.Debug($"Syncing action file '{filePath}' -> '{resolvedPath}' on pod IP '{podIP}'...");
+                        var content = File.ReadAllText(filePath);
+                        await WriteFileAsync(podIP, resolvedPath, content);
+                        context.Debug($"Successfully synced action file '{filePath}'.");
+                    }
+                    catch (Exception ex)
+                    {
+                        context.Warning($"Failed to sync action file {filePath} to workflow pod: {ex.Message}");
+                    }
+                }));
+            }
+
+            if (tasks.Count > 0)
+            {
+                context.Debug($"Syncing {tasks.Count} action files in parallel to workflow pod...");
+                await Task.WhenAll(tasks);
+                context.Debug($"Successfully finished syncing all {tasks.Count} action files in parallel.");
+            }
+            else
+            {
+                context.Debug($"No files found to sync in directory '{hostDirectory}'.");
             }
         }
     }

@@ -34,5 +34,7 @@ namespace GitHub.Runner.Worker.Handlers
         Task SyncFileCommandsFromWorkflowPodAsync(IExecutionContext context, ContainerInfo container, string fileCommandDirectory, string fileSuffix, IEnumerable<IFileCommandExtension> commandExtensions);
 
         Task SyncFileToWorkflowPodAsync(IExecutionContext context, string hostPath);
+
+        Task SyncDirectoryToWorkflowPodAsync(IExecutionContext context, string hostDirectory);
     }
 }

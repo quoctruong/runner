@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -35,6 +35,11 @@ namespace GitHub.Runner.Worker.Handlers
             Trace.Entering();
             ArgUtil.NotNull(ExecutionContext, nameof(ExecutionContext));
             ArgUtil.NotNull(Inputs, nameof(Inputs));
+
+            var workflowAgentManager = HostContext.GetService<IWorkflowAgentManager>();
+            ExecutionContext.Debug($"Calling SyncDirectoryToWorkflowPodAsync for Composite ActionDirectory: '{ActionDirectory}'");
+            await workflowAgentManager.SyncDirectoryToWorkflowPodAsync(ExecutionContext, ActionDirectory);
+            ExecutionContext.Debug($"Finished SyncDirectoryToWorkflowPodAsync for Composite ActionDirectory: '{ActionDirectory}'");
 
             List<Pipelines.ActionStep> steps;
 

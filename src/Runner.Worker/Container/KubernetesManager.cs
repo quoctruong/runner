@@ -57,9 +57,10 @@ namespace GitHub.Runner.Worker.Container
                 }
             }
 
-            var namespaceVal = File.Exists("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
-                ? File.ReadAllText("/var/run/secrets/kubernetes.io/serviceaccount/namespace").Trim()
-                : "default";
+            // Initialize official client with InCluster configuration
+            var k8sConfig = KubernetesClientConfiguration.InClusterConfig();
+            var client = new Kubernetes(k8sConfig);
+            var namespaceVal = k8sConfig.Namespace ?? "default";
 
             var pod = new V1Pod
             {
@@ -165,10 +166,6 @@ namespace GitHub.Runner.Worker.Container
             };
             pod.Spec.Containers.Add(workflowContainer);
 
-            // Initialize official client with InCluster configuration
-            var k8sConfig = KubernetesClientConfiguration.InClusterConfig();
-            var client = new Kubernetes(k8sConfig);
-
             context.Debug($"Final pod spec tolerations count: {pod.Spec.Tolerations?.Count ?? 0}");
             if (pod.Spec.Tolerations != null)
             {
@@ -237,14 +234,11 @@ namespace GitHub.Runner.Worker.Container
             var podName = jobContainer.ContainerId;
             context.Debug($"Native GKE pod cleanup triggered. Deleting workflow pod: {podName}");
 
-            var namespaceVal = File.Exists("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
-                ? File.ReadAllText("/var/run/secrets/kubernetes.io/serviceaccount/namespace").Trim()
-                : "default";
-
             try
             {
                 var k8sConfig = KubernetesClientConfiguration.InClusterConfig();
                 var client = new Kubernetes(k8sConfig);
+                var namespaceVal = k8sConfig.Namespace ?? "default";
 
                 await client.CoreV1.DeleteNamespacedPodAsync(podName, namespaceVal);
                 context.Debug($"Successfully deleted GKE workflow pod: {podName}");

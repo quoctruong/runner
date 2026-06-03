@@ -9,7 +9,6 @@ using GitHub.Runner.Common.Util;
 using GitHub.Runner.Sdk;
 using k8s;
 using k8s.Models;
-using Newtonsoft.Json.Linq;
 
 namespace GitHub.Runner.Worker.Container
 {
@@ -42,10 +41,15 @@ namespace GitHub.Runner.Worker.Container
                 try
                 {
                     var yamlContent = File.ReadAllText(templatePath);
-                    var deserializer = new YamlDotNet.Serialization.DeserializerBuilder().Build();
-                    var extensionDoc = deserializer.Deserialize<object>(yamlContent);
-                    var extensionJson = Newtonsoft.Json.JsonConvert.SerializeObject(extensionDoc);
-                    templatePod = Newtonsoft.Json.JsonConvert.DeserializeObject<V1Pod>(extensionJson);
+                    templatePod = k8s.KubernetesYaml.Deserialize<V1Pod>(yamlContent);
+                    context.Debug($"Parsed template yaml from {templatePath}. Tolerations count: {templatePod?.Spec?.Tolerations?.Count ?? 0}");
+                    if (templatePod?.Spec?.Tolerations != null)
+                    {
+                        foreach (var t in templatePod.Spec.Tolerations)
+                        {
+                            context.Debug($"Template toleration: Key={t.Key}, Value={t.Value}, Operator={t.OperatorProperty}, Effect={t.Effect}");
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -144,13 +148,25 @@ namespace GitHub.Runner.Worker.Container
             var k8sConfig = KubernetesClientConfiguration.InClusterConfig();
             var client = new Kubernetes(k8sConfig);
 
+            context.Debug($"Final pod spec tolerations count: {pod.Spec.Tolerations?.Count ?? 0}");
+            if (pod.Spec.Tolerations != null)
+            {
+                foreach (var t in pod.Spec.Tolerations)
+                {
+                    context.Debug($"Final pod toleration: Key={t.Key}, Value={t.Value}, Operator={t.OperatorProperty}, Effect={t.Effect}");
+                }
+            }
+
             context.Debug($"Creating GKE workflow pod {podName} using Kubernetes C# client...");
+            context.Output($"Creating workflow pod '{podName}'...");
             await client.CoreV1.CreateNamespacedPodAsync(pod, namespaceVal);
 
             context.Debug($"Workflow pod {podName} created successfully. Waiting for readiness and Pod IP...");
+            context.Output($"Workflow pod '{podName}' created successfully. Waiting for readiness and Pod IP...");
 
             // Wait for readiness and resolve IP
             string podIP = null;
+            string lastPhase = null;
             var timeout = DateTime.UtcNow.AddMinutes(5);
             while (DateTime.UtcNow < timeout)
             {
@@ -160,6 +176,11 @@ namespace GitHub.Runner.Worker.Container
                 var ip = polledPod.Status?.PodIP;
 
                 context.Debug($"Workflow pod {podName} phase: {phase}, IP: {ip}");
+                if (phase != lastPhase)
+                {
+                    context.Output($"Pod status: {phase}");
+                    lastPhase = phase;
+                }
 
                 if (string.Equals(phase, "Running", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(ip))
                 {
@@ -211,6 +232,7 @@ namespace GitHub.Runner.Worker.Container
             {
                 context.Warning($"Warning: Failed to delete GKE workflow pod {podName}: {ex.Message}");
             }
+            await Task.CompletedTask;
         }
     }
 }

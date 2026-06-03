@@ -120,11 +120,32 @@ namespace GitHub.Runner.Worker.Container
             // Merge pod-level execution specs
             if (templatePod?.Spec != null)
             {
-                pod.Spec.InitContainers = templatePod.Spec.InitContainers;
                 pod.Spec.Affinity = templatePod.Spec.Affinity;
                 pod.Spec.Tolerations = templatePod.Spec.Tolerations;
                 pod.Spec.NodeSelector = templatePod.Spec.NodeSelector;
             }
+
+            var agentImage = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_WORKFLOW_AGENT_IMAGE");
+            if (string.IsNullOrEmpty(agentImage))
+            {
+                agentImage = "us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/workflow-agent:latest";
+            }
+
+            pod.Spec.InitContainers = new List<V1Container>
+            {
+                new V1Container
+                {
+                    Name = "agent-injector",
+                    Image = agentImage,
+                    Command = new List<string> { "sh", "-c", "cp /bin/workflow-agent /workflow/workflow-agent && cp -r /bin/externals /workflow/externals" },
+                    VolumeMounts = new List<V1VolumeMount>
+                    {
+                        new V1VolumeMount { Name = "work", MountPath = "/workflow" }
+                    }
+                }
+            };
+
+            var agentPort = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_WORKFLOW_AGENT_PORT") ?? "50051";
 
             // Build job container spec
             var workflowContainer = new V1Container
@@ -132,7 +153,7 @@ namespace GitHub.Runner.Worker.Container
                 Name = "job",
                 Image = jobContainer.ContainerImage,
                 Command = new List<string> { "/__w/workflow-agent" },
-                Args = new List<string> { "--port", "50051" },
+                Args = new List<string> { "--port", agentPort },
                 VolumeMounts = new List<V1VolumeMount>
                 {
                     new V1VolumeMount { Name = "work", MountPath = "/__w" },

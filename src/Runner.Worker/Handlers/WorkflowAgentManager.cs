@@ -18,8 +18,9 @@ namespace GitHub.Runner.Worker.Handlers
     {
         private WorkflowAgent.WorkflowAgentClient GetGrpcClient(string podIP)
         {
-            // Establish gRPC channel via private GKE pod-to-pod routing over HTTP/2 (Port 50051)
-            var channel = GrpcChannel.ForAddress($"http://{podIP}:50051", new GrpcChannelOptions
+            var agentPort = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_WORKFLOW_AGENT_PORT") ?? "50051";
+            // Establish gRPC channel via private GKE pod-to-pod routing over HTTP/2
+            var channel = GrpcChannel.ForAddress($"http://{podIP}:{agentPort}", new GrpcChannelOptions
             {
                 Credentials = ChannelCredentials.Insecure,
             });

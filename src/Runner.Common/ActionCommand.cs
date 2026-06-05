@@ -1,4 +1,4 @@
-﻿using GitHub.Runner.Sdk;
+using GitHub.Runner.Sdk;
 using System;
 using System.Collections.Generic;
 
@@ -108,7 +108,7 @@ namespace GitHub.Runner.Common
                     }
                 }
 
-                command.Data = UnescapeData(message.Substring(endIndex + _commandKey.Length));
+                command.Data = UnescapeData(message.Substring(endIndex + _commandKey.Length).TrimEnd('\r', '\n'));
                 return true;
             }
             catch
@@ -178,7 +178,7 @@ namespace GitHub.Runner.Common
                     }
                 }
 
-                command.Data = Unescape(message.Substring(rbIndex + 1));
+                command.Data = Unescape(message.Substring(rbIndex + 1).TrimEnd('\r', '\n'));
                 return true;
             }
             catch

@@ -1,10 +1,12 @@
-﻿using GitHub.DistributedTask.WebApi;
+using GitHub.DistributedTask.WebApi;
 using GitHub.Runner.Worker.Container;
 using GitHub.Runner.Common;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Threading.Tasks;
+using GitHub.Runner.Worker.Handlers;
 
 namespace GitHub.Runner.Worker
 {
@@ -13,7 +15,6 @@ namespace GitHub.Runner.Worker
     {
         void InitializeFiles(IExecutionContext context, ContainerInfo container);
         void ProcessFiles(IExecutionContext context, ContainerInfo container);
-
     }
 
     public sealed class FileCommandManager : RunnerService, IFileCommandManager
@@ -57,11 +58,17 @@ namespace GitHub.Runner.Worker
 
                 var pathToSet = container != null ? container.TranslateToContainerPath(newPath) : newPath;
                 context.SetGitHubContext(fileCommand.ContextName, pathToSet);
+
+                var workflowAgentManager = HostContext.GetService<IWorkflowAgentManager>();
+                workflowAgentManager.InitializeFileCommand(context, container, newPath, fileCommand.ContextName);
             }
         }
 
         public void ProcessFiles(IExecutionContext context, ContainerInfo container)
         {
+            var workflowAgentManager = HostContext.GetService<IWorkflowAgentManager>();
+            workflowAgentManager.SyncFileCommandsFromWorkflowPodAsync(context, container, _fileCommandDirectory, _fileSuffix, _commandExtensions).GetAwaiter().GetResult();
+
             foreach (var fileCommand in _commandExtensions)
             {
                 try
@@ -76,6 +83,7 @@ namespace GitHub.Runner.Worker
                 }
             }
         }
+
 
         private bool TryDeleteFile(string path)
         {

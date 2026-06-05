@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -246,6 +246,12 @@ namespace GitHub.Runner.Worker.Container.ContainerHooks
                 jobContainer.ContainerId = containerId;
             }
 
+            var containerIP = response.Context.Container?.PodIP;
+            if (containerIP != null)
+            {
+                jobContainer.ContainerIP = containerIP;
+            }
+
             var containerNetwork = response.Context.Container?.Network;
             if (containerNetwork != null)
             {
@@ -258,6 +264,7 @@ namespace GitHub.Runner.Worker.Container.ContainerHooks
                 var responseContainerInfo = response.Context.Services[i];
                 var globalContainerInfo = serviceContainers[i];
                 globalContainerInfo.ContainerId = responseContainerInfo.Id;
+                globalContainerInfo.ContainerIP = responseContainerInfo.PodIP;
                 globalContainerInfo.ContainerNetwork = responseContainerInfo.Network;
 
                 var service = new DictionaryContextData()

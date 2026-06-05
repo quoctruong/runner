@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
@@ -6,9 +6,15 @@ using System.Threading.Tasks;
 using GitHub.Runner.Worker.Container;
 using GitHub.Runner.Common;
 using GitHub.Runner.Sdk;
+using GitHub.Runner.Worker;
 using System.Linq;
 using GitHub.Runner.Worker.Container.ContainerHooks;
 using System.Threading.Channels;
+using System.IO;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace GitHub.Runner.Worker.Handlers
 {
@@ -216,6 +222,24 @@ namespace GitHub.Runner.Worker.Handlers
                                             CancellationToken cancellationToken)
         {
             ArgUtil.NotNull(Container, nameof(Container));
+            if (FeatureManager.IsNoSharedVolumeEnabled())
+            {
+                TranslateToContainerPath(environment);
+                var workflowAgentManager = HostContext.GetService<IWorkflowAgentManager>();
+                return await workflowAgentManager.ExecuteAsync(
+                    context,
+                    Container,
+                    workingDirectory,
+                    fileName,
+                    arguments,
+                    environment,
+                    standardInInput,
+                    PrependPath,
+                    data => OutputDataReceived?.Invoke(this, new ProcessDataReceivedEventArgs(data)),
+                    data => ErrorDataReceived?.Invoke(this, new ProcessDataReceivedEventArgs(data)),
+                    cancellationToken);
+            }
+
             var containerHookManager = HostContext.GetService<IContainerHookManager>();
             if (FeatureManager.IsContainerHooksEnabled(context.Global.Variables))
             {
@@ -330,5 +354,6 @@ namespace GitHub.Runner.Worker.Handlers
                 environment[envKey] = this.Container.TranslateToContainerPath(environment[envKey]);
             }
         }
+
     }
 }

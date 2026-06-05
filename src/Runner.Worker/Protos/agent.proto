@@ -6,14 +6,16 @@ option csharp_namespace = "GitHub.Runner.Worker.Protos";
 option go_package = "github.com/github/runner/workflow";
 
 service WorkflowAgent {
-    rpc WriteFile (WriteFileRequest) returns (WriteFileResponse);
-    rpc ReadFile (ReadFileRequest) returns (ReadFileResponse);
+    rpc WriteFile (stream WriteFileRequest) returns (WriteFileResponse);
+    rpc ReadFile (ReadFileRequest) returns (stream ReadFileResponse);
     rpc Execute (ExecuteRequest) returns (stream ExecuteResponse);
 }
 
 message WriteFileRequest {
-    string path = 1;
-    string content = 2;
+    oneof request {
+        string path = 1;
+        bytes chunk = 2;
+    }
 }
 
 message WriteFileResponse {
@@ -25,7 +27,7 @@ message ReadFileRequest {
 }
 
 message ReadFileResponse {
-    string content = 1;
+    bytes chunk = 1;
 }
 
 message ExecuteRequest {

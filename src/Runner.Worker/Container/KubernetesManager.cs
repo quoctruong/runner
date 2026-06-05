@@ -34,6 +34,9 @@ namespace GitHub.Runner.Worker.Container
             jobContainer.ContainerId = podName;
             context.JobContext.Container["id"] = new StringContextData(podName);
 
+            var runnerPodName = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_POD_NAME");
+            bool isMtlsEnabled = !string.IsNullOrEmpty(runnerPodName) && Directory.Exists("/etc/certs");
+            var mtlsSecretName = "certs-" + runnerPodName;
             var templatePath = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE") ?? "/etc/config/extension.yaml";
             V1Pod templatePod = null;
             if (File.Exists(templatePath))
@@ -62,6 +65,21 @@ namespace GitHub.Runner.Worker.Container
             var client = new Kubernetes(k8sConfig);
             var namespaceVal = k8sConfig.Namespace ?? "default";
 
+            var podVolumes = new List<V1Volume>
+            {
+                new V1Volume { Name = "work", EmptyDir = new V1EmptyDirVolumeSource() }
+            };
+            if (isMtlsEnabled)
+            {
+                podVolumes.Add(new V1Volume
+                {
+                    Name = "certs-volume",
+                    Secret = new V1SecretVolumeSource
+                    {
+                        SecretName = mtlsSecretName
+                    }
+                });
+            }
             var pod = new V1Pod
             {
                 ApiVersion = "v1",
@@ -75,10 +93,7 @@ namespace GitHub.Runner.Worker.Container
                 Spec = new V1PodSpec
                 {
                     RestartPolicy = "Never",
-                    Volumes = new List<V1Volume>
-                    {
-                        new V1Volume { Name = "work", EmptyDir = new V1EmptyDirVolumeSource() }
-                    },
+                    Volumes = podVolumes,
                     Containers = new List<V1Container>()
                 }
             };
@@ -148,6 +163,22 @@ namespace GitHub.Runner.Worker.Container
 
             var agentPort = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_WORKFLOW_AGENT_PORT") ?? "50051";
 
+            var workflowVolumeMounts = new List<V1VolumeMount>
+            {
+                new V1VolumeMount { Name = "work", MountPath = "/__w" },
+                new V1VolumeMount { Name = "work", MountPath = "/__e", SubPath = "externals" },
+                new V1VolumeMount { Name = "work", MountPath = "/github/home", SubPath = "_temp/_github_home" },
+                new V1VolumeMount { Name = "work", MountPath = "/github/workflow", SubPath = "_temp/_github_workflow" }
+            };
+            if (isMtlsEnabled)
+            {
+                workflowVolumeMounts.Add(new V1VolumeMount
+                {
+                    Name = "certs-volume",
+                    MountPath = "/etc/certs",
+                    ReadOnlyProperty = true
+                });
+            }
             // Build job container spec
             var workflowContainer = new V1Container
             {
@@ -155,13 +186,7 @@ namespace GitHub.Runner.Worker.Container
                 Image = jobContainer.ContainerImage,
                 Command = new List<string> { "/__w/workflow-agent" },
                 Args = new List<string> { "--port", agentPort },
-                VolumeMounts = new List<V1VolumeMount>
-                {
-                    new V1VolumeMount { Name = "work", MountPath = "/__w" },
-                    new V1VolumeMount { Name = "work", MountPath = "/__e", SubPath = "externals" },
-                    new V1VolumeMount { Name = "work", MountPath = "/github/home", SubPath = "_temp/_github_home" },
-                    new V1VolumeMount { Name = "work", MountPath = "/github/workflow", SubPath = "_temp/_github_workflow" }
-                },
+                VolumeMounts = workflowVolumeMounts,
                 Resources = resources
             };
             pod.Spec.Containers.Add(workflowContainer);

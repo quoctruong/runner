@@ -37,12 +37,12 @@ namespace GitHub.Actions.WorkflowParser.Conversion
             if (EvaluateCurrent() is Scalar scalar)
             {
                 // Tag specified
-                if (!String.IsNullOrEmpty(scalar.Tag))
+                if (!scalar.Tag.IsEmpty && !String.IsNullOrEmpty(scalar.Tag.Value))
                 {
                     // String tag
-                    if (String.Equals(scalar.Tag, c_stringTag, StringComparison.Ordinal))
+                    if (String.Equals(scalar.Tag.Value, c_stringTag, StringComparison.Ordinal))
                     {
-                        value = new StringToken(m_fileId, scalar.Start.Line, scalar.Start.Column, scalar.Value);
+                        value = new StringToken(m_fileId, (int)scalar.Start.Line, (int)scalar.Start.Column, scalar.Value);
                         MoveNext();
                         return true;
                     }
@@ -54,7 +54,7 @@ namespace GitHub.Actions.WorkflowParser.Conversion
                     }
 
                     // Boolean, Float, Integer, or Null
-                    switch (scalar.Tag)
+                    switch (scalar.Tag.Value)
                     {
                         case c_booleanTag:
                             value = ParseBoolean(scalar);
@@ -94,7 +94,7 @@ namespace GitHub.Actions.WorkflowParser.Conversion
                     }
                     else
                     {
-                        value = new StringToken(m_fileId, scalar.Start.Line, scalar.Start.Column, scalar.Value);
+                        value = new StringToken(m_fileId, (int)scalar.Start.Line, (int)scalar.Start.Column, scalar.Value);
                     }
 
                     MoveNext();
@@ -102,7 +102,7 @@ namespace GitHub.Actions.WorkflowParser.Conversion
                 }
 
                 // Otherwise assume string
-                value = new StringToken(m_fileId, scalar.Start.Line, scalar.Start.Column, scalar.Value);
+                value = new StringToken(m_fileId, (int)scalar.Start.Line, (int)scalar.Start.Column, scalar.Value);
                 MoveNext();
                 return true;
             }
@@ -115,7 +115,7 @@ namespace GitHub.Actions.WorkflowParser.Conversion
         {
             if (EvaluateCurrent() is SequenceStart sequenceStart)
             {
-                value = new SequenceToken(m_fileId, sequenceStart.Start.Line, sequenceStart.Start.Column);
+                value = new SequenceToken(m_fileId, (int)sequenceStart.Start.Line, (int)sequenceStart.Start.Column);
                 MoveNext();
                 return true;
             }
@@ -139,7 +139,7 @@ namespace GitHub.Actions.WorkflowParser.Conversion
         {
             if (EvaluateCurrent() is MappingStart mappingStart)
             {
-                value = new MappingToken(m_fileId, mappingStart.Start.Line, mappingStart.Start.Column);
+                value = new MappingToken(m_fileId, (int)mappingStart.Start.Line, (int)mappingStart.Start.Column);
                 MoveNext();
                 return true;
             }
@@ -358,7 +358,7 @@ namespace GitHub.Actions.WorkflowParser.Conversion
 
                 // Anchor?
                 var anchor = (m_current as NodeEvent)?.Anchor;
-                if (anchor != null)
+                if (anchor != null && !string.IsNullOrEmpty(anchor.Value.Value))
                 {
                     // Not allowed?
                     if (!m_allowAnchors)
@@ -373,7 +373,7 @@ namespace GitHub.Actions.WorkflowParser.Conversion
                     }
 
                     // Store anchor index
-                    m_anchors[anchor] = m_events.Count - 1;
+                    m_anchors[anchor.Value.Value] = m_events.Count - 1;
 
                     // Count anchors
                     m_telemetry.YamlAnchors++;
@@ -405,9 +405,9 @@ namespace GitHub.Actions.WorkflowParser.Conversion
             if (m_current is AnchorAlias alias)
             {
                 // Anchor index
-                if (!m_anchors.TryGetValue(alias.Value, out var anchorIndex))
+                if (!m_anchors.TryGetValue(alias.Value.Value, out var anchorIndex))
                 {
-                    throw new InvalidOperationException($"Unknown anchor '{alias.Value}'");
+                    throw new InvalidOperationException($"Unknown anchor '{alias.Value.Value}'");
                 }
 
                 // Move to anchor
@@ -481,12 +481,12 @@ namespace GitHub.Actions.WorkflowParser.Conversion
                 case "true":
                 case "True":
                 case "TRUE":
-                    value = new BooleanToken(m_fileId, scalar.Start.Line, scalar.Start.Column, true);
+                    value = new BooleanToken(m_fileId, (int)scalar.Start.Line, (int)scalar.Start.Column, true);
                     return true;
                 case "false":
                 case "False":
                 case "FALSE":
-                    value = new BooleanToken(m_fileId, scalar.Start.Line, scalar.Start.Column, false);
+                    value = new BooleanToken(m_fileId, (int)scalar.Start.Line, (int)scalar.Start.Column, false);
                     return true;
             }
 
@@ -511,17 +511,17 @@ namespace GitHub.Actions.WorkflowParser.Conversion
                     case "+.inf":
                     case "+.Inf":
                     case "+.INF":
-                        value = new NumberToken(m_fileId, scalar.Start.Line, scalar.Start.Column, Double.PositiveInfinity);
+                        value = new NumberToken(m_fileId, (int)scalar.Start.Line, (int)scalar.Start.Column, Double.PositiveInfinity);
                         return true;
                     case "-.inf":
                     case "-.Inf":
                     case "-.INF":
-                        value = new NumberToken(m_fileId, scalar.Start.Line, scalar.Start.Column, Double.NegativeInfinity);
+                        value = new NumberToken(m_fileId, (int)scalar.Start.Line, (int)scalar.Start.Column, Double.NegativeInfinity);
                         return true;
                     case ".nan":
                     case ".NaN":
                     case ".NAN":
-                        value = new NumberToken(m_fileId, scalar.Start.Line, scalar.Start.Column, Double.NaN);
+                        value = new NumberToken(m_fileId, (int)scalar.Start.Line, (int)scalar.Start.Column, Double.NaN);
                         return true;
                 }
 
@@ -564,7 +564,7 @@ namespace GitHub.Actions.WorkflowParser.Conversion
                         // Try parse
                         if (Double.TryParse(str, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var doubleValue))
                         {
-                            value = new NumberToken(m_fileId, scalar.Start.Line, scalar.Start.Column, doubleValue);
+                            value = new NumberToken(m_fileId, (int)scalar.Start.Line, (int)scalar.Start.Column, doubleValue);
                             return true;
                         }
                         // Otherwise exceeds range
@@ -598,7 +598,7 @@ namespace GitHub.Actions.WorkflowParser.Conversion
                             // Try parse
                             if (Double.TryParse(str, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint | NumberStyles.AllowExponent, CultureInfo.InvariantCulture, out var doubleValue))
                             {
-                                value = new NumberToken(m_fileId, scalar.Start.Line, scalar.Start.Column, (Double)doubleValue);
+                                value = new NumberToken(m_fileId, (int)scalar.Start.Line, (int)scalar.Start.Column, (Double)doubleValue);
                                 return true;
                             }
                             // Otherwise exceeds range
@@ -631,7 +631,7 @@ namespace GitHub.Actions.WorkflowParser.Conversion
                     // Try parse
                     if (Double.TryParse(str, NumberStyles.None, CultureInfo.InvariantCulture, out var doubleValue))
                     {
-                        value = new NumberToken(m_fileId, scalar.Start.Line, scalar.Start.Column, doubleValue);
+                        value = new NumberToken(m_fileId, (int)scalar.Start.Line, (int)scalar.Start.Column, doubleValue);
                         return true;
                     }
 
@@ -646,7 +646,7 @@ namespace GitHub.Actions.WorkflowParser.Conversion
                     // Try parse
                     if (Double.TryParse(str, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var doubleValue))
                     {
-                        value = new NumberToken(m_fileId, scalar.Start.Line, scalar.Start.Column, doubleValue);
+                        value = new NumberToken(m_fileId, (int)scalar.Start.Line, (int)scalar.Start.Column, doubleValue);
                         return true;
                     }
 
@@ -662,7 +662,7 @@ namespace GitHub.Actions.WorkflowParser.Conversion
                     // Try parse
                     if (Int32.TryParse(str.Substring(2), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var integerValue))
                     {
-                        value = new NumberToken(m_fileId, scalar.Start.Line, scalar.Start.Column, integerValue);
+                        value = new NumberToken(m_fileId, (int)scalar.Start.Line, (int)scalar.Start.Column, integerValue);
                         return true;
                     }
 
@@ -687,7 +687,7 @@ namespace GitHub.Actions.WorkflowParser.Conversion
                         ThrowInvalidValue(scalar, c_integerTag); // throws
                     }
 
-                    value = new NumberToken(m_fileId, scalar.Start.Line, scalar.Start.Column, integerValue);
+                    value = new NumberToken(m_fileId, (int)scalar.Start.Line, (int)scalar.Start.Column, integerValue);
                     return true;
                 }
             }
@@ -708,7 +708,7 @@ namespace GitHub.Actions.WorkflowParser.Conversion
                 case "Null":
                 case "NULL":
                 case "~":
-                    value = new NullToken(m_fileId, scalar.Start.Line, scalar.Start.Column);
+                    value = new NullToken(m_fileId, (int)scalar.Start.Line, (int)scalar.Start.Column);
                     return true;
             }
 

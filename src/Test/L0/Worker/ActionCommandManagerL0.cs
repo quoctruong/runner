@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.CompilerServices;
@@ -6,6 +6,7 @@ using GitHub.DistributedTask.Pipelines.ContextData;
 using GitHub.DistributedTask.WebApi;
 using GitHub.Runner.Worker;
 using GitHub.Runner.Worker.Container;
+using GitHub.Runner.Worker.Handlers;
 using Moq;
 using Xunit;
 using Pipelines = GitHub.DistributedTask.Pipelines;
@@ -421,6 +422,190 @@ namespace GitHub.Runner.Common.Tests.Worker
         [Fact]
         [Trait("Level", "L0")]
         [Trait("Category", "Worker")]
+        public void AddMatcherWithNoSharedVolume()
+        {
+            var originNoSharedVolume = Environment.GetEnvironmentVariable(Constants.Variables.Actions.NoSharedVolume);
+            try
+            {
+                Environment.SetEnvironmentVariable(Constants.Variables.Actions.NoSharedVolume, "true");
+
+                using (TestHostContext hc = CreateTestContext())
+                {
+                    var container = new ContainerInfo()
+                    {
+                        ContainerIP = "10.0.0.1"
+                    };
+                    var containerFile = "/some-container-directory/my-matcher.json";
+
+                    var content = @"
+{
+    ""problemMatcher"": [
+        {
+            ""owner"": ""my-matcher"",
+            ""pattern"": [
+                {
+                    ""regexp"": ""^ERROR: (.+)$"",
+                    ""message"": 1
+                }
+            ]
+        }
+    ]
+}";
+                    var mockWorkflowAgentManager = new Mock<IWorkflowAgentManager>();
+                    mockWorkflowAgentManager
+                        .Setup(x => x.ReadFileAsync("10.0.0.1", containerFile))
+                        .ReturnsAsync(content);
+                    hc.SetSingleton<IWorkflowAgentManager>(mockWorkflowAgentManager.Object);
+
+                    // Act
+                    _commandManager.TryProcessCommand(_ec.Object, $"::add-matcher::{containerFile}", container);
+
+                    // Assert
+                    mockWorkflowAgentManager.Verify(x => x.ReadFileAsync("10.0.0.1", containerFile), Times.Once);
+                    _ec.Verify(x => x.AddMatchers(It.IsAny<IssueMatchersConfig>()), Times.Once);
+                }
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(Constants.Variables.Actions.NoSharedVolume, originNoSharedVolume);
+            }
+        }
+
+        [Fact]
+        [Trait("Level", "L0")]
+        [Trait("Category", "Worker")]
+        public void AddMatcherWithNoSharedVolumeLoadsFromHostIfExist()
+        {
+            var originNoSharedVolume = Environment.GetEnvironmentVariable(Constants.Variables.Actions.NoSharedVolume);
+            try
+            {
+                Environment.SetEnvironmentVariable(Constants.Variables.Actions.NoSharedVolume, "true");
+
+                using (TestHostContext hc = CreateTestContext())
+                {
+                    var hostDirectory = hc.GetDirectory(WellKnownDirectory.Temp);
+                    var hostFile = Path.Combine(hostDirectory, "my-matcher.json");
+                    Directory.CreateDirectory(hostDirectory);
+                    var content = @"
+{
+    ""problemMatcher"": [
+        {
+            ""owner"": ""my-matcher"",
+            ""pattern"": [
+                {
+                    ""regexp"": ""^ERROR: (.+)$"",
+                    ""message"": 1
+                }
+            ]
+        }
+    ]
+}";
+                    File.WriteAllText(hostFile, content);
+
+                    // Setup translation info
+                    var container = new ContainerInfo()
+                    {
+                        ContainerIP = "10.0.0.1"
+                    };
+                    var containerDirectory = "/some-container-directory";
+                    var containerFile = Path.Combine(containerDirectory, "my-matcher.json");
+                    container.AddPathTranslateMapping(hostDirectory, containerDirectory);
+
+                    var mockWorkflowAgentManager = new Mock<IWorkflowAgentManager>();
+                    hc.SetSingleton<IWorkflowAgentManager>(mockWorkflowAgentManager.Object);
+
+                    // Act
+                    _commandManager.TryProcessCommand(_ec.Object, $"::add-matcher::{containerFile}", container);
+
+                    // Assert
+                    mockWorkflowAgentManager.Verify(x => x.ReadFileAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+                    _ec.Verify(x => x.AddMatchers(It.IsAny<IssueMatchersConfig>()), Times.Once);
+                }
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(Constants.Variables.Actions.NoSharedVolume, originNoSharedVolume);
+            }
+        }
+
+        [Fact]
+        [Trait("Level", "L0")]
+        [Trait("Category", "Worker")]
+        public void AddMatcherWithNoSharedVolumeLoadsFromHostIfExistWithTrailingWhitespace()
+        {
+            var originNoSharedVolume = Environment.GetEnvironmentVariable(Constants.Variables.Actions.NoSharedVolume);
+            try
+            {
+                Environment.SetEnvironmentVariable(Constants.Variables.Actions.NoSharedVolume, "true");
+
+                using (TestHostContext hc = CreateTestContext())
+                {
+                    var hostDirectory = hc.GetDirectory(WellKnownDirectory.Temp);
+                    var hostFile = Path.Combine(hostDirectory, "my-matcher.json");
+                    Directory.CreateDirectory(hostDirectory);
+                    var content = @"
+{
+    ""problemMatcher"": [
+        {
+            ""owner"": ""my-matcher"",
+            ""pattern"": [
+                {
+                    ""regexp"": ""^ERROR: (.+)$"",
+                    ""message"": 1
+                }
+            ]
+        }
+    ]
+}";
+                    File.WriteAllText(hostFile, content);
+
+                    // Setup translation info
+                    var container = new ContainerInfo()
+                    {
+                        ContainerIP = "10.0.0.1"
+                    };
+                    var containerDirectory = "/some-container-directory";
+                    var containerFile = Path.Combine(containerDirectory, "my-matcher.json");
+                    container.AddPathTranslateMapping(hostDirectory, containerDirectory);
+
+                    var mockWorkflowAgentManager = new Mock<IWorkflowAgentManager>();
+                    hc.SetSingleton<IWorkflowAgentManager>(mockWorkflowAgentManager.Object);
+
+                    // Act - passing path with trailing carriage return and newline
+                    _commandManager.TryProcessCommand(_ec.Object, $"::add-matcher::{containerFile}\r\n", container);
+
+                    // Assert
+                    mockWorkflowAgentManager.Verify(x => x.ReadFileAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+                    _ec.Verify(x => x.AddMatchers(It.IsAny<IssueMatchersConfig>()), Times.Once);
+                }
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(Constants.Variables.Actions.NoSharedVolume, originNoSharedVolume);
+            }
+        }
+
+
+        [Fact]
+        [Trait("Level", "L0")]
+        [Trait("Category", "Worker")]
+        public void RemoveMatcherWithOwnerAndTrailingNewline()
+        {
+            using (TestHostContext hc = CreateTestContext())
+            {
+                // Act
+                _commandManager.TryProcessCommand(_ec.Object, "::remove-matcher owner=checkout-git::\r\n", null);
+
+                // Assert
+                _ec.Verify(x => x.AddIssue(Moq.It.Is<Issue>(i => i.Type == IssueType.Warning), Moq.It.IsAny<ExecutionContextLogOptions>()), Times.Never);
+                _ec.Verify(x => x.RemoveMatchers(It.IsAny<System.Collections.Generic.IEnumerable<string>>()), Times.Once);
+            }
+        }
+
+        [Fact]
+        [Trait("Level", "L0")]
+        [Trait("Category", "Worker")]
+
         public void AddMaskWithMultilineValue()
         {
             using (TestHostContext hc = CreateTestContext())
@@ -459,6 +644,7 @@ namespace GitHub.Runner.Common.Tests.Worker
                 new AddMaskCommandExtension(),
                 new SetOutputCommandExtension(),
                 new SaveStateCommandExtension(),
+                new RemoveMatcherCommandExtension(),
             };
             foreach (var command in commands)
             {
@@ -471,6 +657,10 @@ namespace GitHub.Runner.Common.Tests.Worker
             // Mock pipeline directory manager
             _pipelineDirectoryManager = new Mock<IPipelineDirectoryManager>();
             hostContext.SetSingleton<IPipelineDirectoryManager>(_pipelineDirectoryManager.Object);
+
+            // Mock workflow agent manager
+            var mockWorkflowAgentManager = new Mock<IWorkflowAgentManager>();
+            hostContext.SetSingleton<IWorkflowAgentManager>(mockWorkflowAgentManager.Object);
 
             // Execution context
             _ec = new Mock<IExecutionContext>();

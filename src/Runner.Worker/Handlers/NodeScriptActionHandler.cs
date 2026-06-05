@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -148,6 +148,12 @@ namespace GitHub.Runner.Worker.Handlers
 
             // Remove environment variable that may cause conflicts with the node within the runner.
             Environment.Remove("NODE_ICU_DATA"); // https://github.com/actions/runner/issues/795
+
+            var workflowAgentManager = HostContext.GetService<IWorkflowAgentManager>();
+            ExecutionContext.Debug($"Calling SyncDirectoryToWorkflowPodAsync for Node ActionDirectory: '{ActionDirectory}'");
+            await workflowAgentManager.SyncDirectoryToWorkflowPodAsync(ExecutionContext, ActionDirectory);
+            ExecutionContext.Debug($"Finished SyncDirectoryToWorkflowPodAsync for Node ActionDirectory: '{ActionDirectory}'");
+
 
             using (var stdoutManager = new OutputManager(ExecutionContext, ActionCommandManager))
             using (var stderrManager = new OutputManager(ExecutionContext, ActionCommandManager))

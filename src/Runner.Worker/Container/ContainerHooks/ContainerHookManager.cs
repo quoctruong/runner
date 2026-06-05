@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -275,5 +275,6 @@ namespace GitHub.Runner.Worker.Container.ContainerHooks
                 context.JobContext.Services[globalContainerInfo.ContainerNetworkAlias] = service;
             }
         }
+
     }
 }

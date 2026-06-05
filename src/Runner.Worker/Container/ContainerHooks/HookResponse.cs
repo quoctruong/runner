@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using Newtonsoft.Json.Linq;
 
@@ -33,5 +33,6 @@ namespace GitHub.Runner.Worker.Container.ContainerHooks
         public string Id { get; set; }
         public string Network { get; set; }
         public IDictionary<string, string> Ports { get; set; }
+        public string PodIP { get; set; }
     }
 }

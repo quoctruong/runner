@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package github.runner.workflow;
+
+option csharp_namespace = "GitHub.Runner.Worker.Protos";
+option go_package = "github.com/github/runner/workflow";
+
+service WorkflowAgent {
+    rpc WriteFile (stream WriteFileRequest) returns (WriteFileResponse);
+    rpc ReadFile (ReadFileRequest) returns (stream ReadFileResponse);
+    rpc Execute (ExecuteRequest) returns (stream ExecuteResponse);
+}
+
+message WriteFileRequest {
+    oneof request {
+        string path = 1;
+        bytes chunk = 2;
+    }
+}
+
+message WriteFileResponse {
+    bool success = 1;
+}
+
+message ReadFileRequest {
+    string path = 1;
+}
+
+message ReadFileResponse {
+    bytes chunk = 1;
+}
+
+message ExecuteRequest {
+    string command = 1;
+    string arguments = 2;
+    map<string, string> environment = 3;
+    string working_directory = 4;
+    string stdin = 5;
+    string prepend_path = 6;
+}
+
+message ExecuteResponse {
+    enum StreamType {
+        STDOUT = 0;
+        STDERR = 1;
+        EXIT_CODE = 2;
+    }
+    StreamType stream = 1;
+    string data = 2;
+    int32 exit_code = 3;
+}

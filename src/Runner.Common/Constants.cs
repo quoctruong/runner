@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace GitHub.Runner.Common
 {
@@ -295,6 +295,8 @@ namespace GitHub.Runner.Common
                 public static readonly string AllowUnsupportedCommands = "ACTIONS_ALLOW_UNSECURE_COMMANDS";
                 public static readonly string AllowUnsupportedStopCommandTokens = "ACTIONS_ALLOW_UNSECURE_STOPCOMMAND_TOKENS";
                 public static readonly string RequireJobContainer = "ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER";
+                public static readonly string NoSharedVolume = "ACTIONS_RUNNER_NO_SHARED_VOLUME";
+                public static readonly string SecurityToken = "ACTIONS_RUNNER_SECURITY_TOKEN";
                 public static readonly string ReturnVersionDeprecatedExitCode = "ACTIONS_RUNNER_RETURN_VERSION_DEPRECATED_EXIT_CODE";
                 public static readonly string RunnerDebug = "ACTIONS_RUNNER_DEBUG";
                 public static readonly string StepDebug = "ACTIONS_STEP_DEBUG";

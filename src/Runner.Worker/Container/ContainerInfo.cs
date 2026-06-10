@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using GitHub.Runner.Common;
@@ -78,6 +78,7 @@ namespace GitHub.Runner.Worker.Container
         }
 
         public string ContainerId { get; set; }
+        public string ContainerIP { get; set; }
         public string ContainerDisplayName { get; set; }
         public string ContainerNetwork { get; set; }
         public string ContainerNetworkAlias { get; set; }

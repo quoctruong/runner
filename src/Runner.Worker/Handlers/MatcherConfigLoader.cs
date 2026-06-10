@@ -44,28 +44,15 @@ namespace GitHub.Runner.Worker.Handlers
 
             context.Debug($"[MatcherConfigLoader] Retrieving matcher config from workflow agent: {containerPath}");
 
-            string tempFile = null;
             try
             {
                 var content = workflowAgentManager.ReadFileAsync(container.ContainerIP, containerPath).GetAwaiter().GetResult();
-                tempFile = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".json");
-                File.WriteAllText(tempFile, content);
-
-                return IOUtil.LoadObject<IssueMatchersConfig>(tempFile);
+                return StringUtil.ConvertFromJson<IssueMatchersConfig>(content);
             }
-            finally
+            catch (Exception ex)
             {
-                if (tempFile != null && File.Exists(tempFile))
-                {
-                    try
-                    {
-                        File.Delete(tempFile);
-                    }
-                    catch
-                    {
-                        // Ignore cleanup errors
-                    }
-                }
+                context.Error($"Failed to retrieve/deserialize matcher config from workflow agent: {ex.Message}");
+                throw;
             }
         }
     }

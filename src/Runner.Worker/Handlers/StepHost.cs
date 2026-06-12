@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
@@ -169,6 +169,12 @@ namespace GitHub.Runner.Worker.Handlers
                 executionContext.Warning(warningMessage);
             }
 
+            if (FeatureManager.IsNoSharedVolumeEnabled())
+            {
+                executionContext.Debug($"Running JavaScript Action in GKE Native Pod with default external tool: {nodeExternal}");
+                return nodeExternal;
+            }
+
             if (FeatureManager.IsContainerHooksEnabled(executionContext.Global.Variables))
             {
                 if (Container.IsAlpine)
@@ -216,6 +222,24 @@ namespace GitHub.Runner.Worker.Handlers
                                             CancellationToken cancellationToken)
         {
             ArgUtil.NotNull(Container, nameof(Container));
+            if (FeatureManager.IsNoSharedVolumeEnabled())
+            {
+                TranslateToContainerPath(environment);
+                var workflowAgentManager = HostContext.GetService<IWorkflowAgentManager>();
+                return await workflowAgentManager.ExecuteAsync(
+                    context,
+                    Container,
+                    workingDirectory,
+                    fileName,
+                    arguments,
+                    environment,
+                    standardInInput,
+                    PrependPath,
+                    data => OutputDataReceived?.Invoke(this, new ProcessDataReceivedEventArgs(data)),
+                    data => ErrorDataReceived?.Invoke(this, new ProcessDataReceivedEventArgs(data)),
+                    cancellationToken);
+            }
+
             var containerHookManager = HostContext.GetService<IContainerHookManager>();
             if (FeatureManager.IsContainerHooksEnabled(context.Global.Variables))
             {

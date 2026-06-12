@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -1302,6 +1302,9 @@ namespace GitHub.Runner.Worker
                 Trace.Info($"Write event payload to {workflowFile}");
                 File.WriteAllText(workflowFile, gitHubEvent, new UTF8Encoding(false));
                 SetGitHubContext("event_path", workflowFile);
+
+                var workflowAgentManager = HostContext.GetService<IWorkflowAgentManager>();
+                workflowAgentManager.SyncWebhookPayloadAsync(this, workflowFile, gitHubEvent).GetAwaiter().GetResult();
             }
         }
 

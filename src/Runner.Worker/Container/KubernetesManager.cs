@@ -32,7 +32,17 @@ namespace GitHub.Runner.Worker.Container
                 throw new InvalidOperationException("Job container is required.");
             }
 
-            var podName = $"runner-{Guid.NewGuid().ToString().Substring(0, 8)}";
+            var runnerPodName = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_POD_NAME");
+            string podName;
+            if (!string.IsNullOrEmpty(runnerPodName))
+            {
+                var prefix = runnerPodName.Length > 54 ? runnerPodName.Substring(0, 54) : runnerPodName;
+                podName = $"{prefix}-workflow";
+            }
+            else
+            {
+                podName = $"runner-{Guid.NewGuid().ToString().Substring(0, 8)}";
+            }
             jobContainer.ContainerId = podName;
             context.JobContext.Container["id"] = new StringContextData(podName);
 
@@ -59,27 +69,6 @@ namespace GitHub.Runner.Worker.Container
             jobContainer.IsAlpine = false;
             context.Output("Workflow pod is ready");
             context.Debug($"Workflow pod resolved ContainerIP: {podIP}");
-        }
-
-        private V1Pod LoadTemplatePod(IExecutionContext context)
-        {
-            var templatePath = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE") ?? "/etc/config/extension.yaml";
-
-            if (!File.Exists(templatePath))
-            {
-                context.Debug($"Pod extension configuration template file does not exist at '{templatePath}'. Skipping template loading.");
-                return null;
-            }
-
-            try
-            {
-                return k8s.KubernetesYaml.Deserialize<V1Pod>(File.ReadAllText(templatePath));
-            }
-            catch (Exception ex)
-            {
-                context.Warning($"Warning: Failed to parse pod extension configuration template from {templatePath}: {ex.Message}");
-                return null;
-            }
         }
 
         private V1Pod BuildPodSpec(
@@ -130,6 +119,27 @@ namespace GitHub.Runner.Worker.Container
             pod.Spec.Containers.Add(CreateJobContainer(jobContainer, isMtlsEnabled, resources));
 
             return pod;
+        }
+
+        private V1Pod LoadTemplatePod(IExecutionContext context)
+        {
+            var templatePath = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE") ?? "/etc/config/extension.yaml";
+
+            if (!File.Exists(templatePath))
+            {
+                context.Debug($"Pod extension configuration template file does not exist at '{templatePath}'. Skipping template loading.");
+                return null;
+            }
+
+            try
+            {
+                return k8s.KubernetesYaml.Deserialize<V1Pod>(File.ReadAllText(templatePath));
+            }
+            catch (Exception ex)
+            {
+                context.Warning($"Warning: Failed to parse pod extension configuration template from {templatePath}: {ex.Message}");
+                return null;
+            }
         }
 
         private List<V1Volume> GetPodVolumes(string runnerPodName, bool isMtlsEnabled, V1Pod templatePod)

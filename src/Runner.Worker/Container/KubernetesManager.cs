@@ -36,41 +36,77 @@ namespace GitHub.Runner.Worker.Container
 
             var runnerPodName = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_POD_NAME");
             bool isMtlsEnabled = !string.IsNullOrEmpty(runnerPodName) && Directory.Exists("/etc/certs");
-            var mtlsSecretName = "certs-" + runnerPodName;
             var templatePath = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE") ?? "/etc/config/extension.yaml";
-            V1Pod templatePod = null;
-            if (File.Exists(templatePath))
-            {
-                try
-                {
-                    var yamlContent = File.ReadAllText(templatePath);
-                    templatePod = k8s.KubernetesYaml.Deserialize<V1Pod>(yamlContent);
-                    context.Debug($"Parsed template yaml from {templatePath}. Tolerations count: {templatePod?.Spec?.Tolerations?.Count ?? 0}");
-                    if (templatePod?.Spec?.Tolerations != null)
-                    {
-                        foreach (var t in templatePod.Spec.Tolerations)
-                        {
-                            context.Debug($"Template toleration: Key={t.Key}, Value={t.Value}, Operator={t.OperatorProperty}, Effect={t.Effect}");
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    context.Warning($"Warning: Failed to parse pod extension configuration template from {templatePath}: {ex.Message}");
-                }
-            }
+            
+            V1Pod templatePod = LoadTemplatePod(context, templatePath);
 
             // Initialize official client with InCluster configuration
             var k8sConfig = KubernetesClientConfiguration.InClusterConfig();
             var client = new Kubernetes(k8sConfig);
             var namespaceVal = k8sConfig.Namespace ?? "default";
 
+            // Build Pod object
+            var pod = BuildPodSpec(context, podName, runnerPodName, isMtlsEnabled, templatePod, jobContainer);
+
+            context.Debug($"Creating GKE workflow pod {podName} using Kubernetes C# client...");
+            context.Output($"Creating workflow pod '{podName}'...");
+            await client.CoreV1.CreateNamespacedPodAsync(pod, namespaceVal);
+
+            context.Debug($"Workflow pod {podName} created successfully. Waiting for readiness and Pod IP...");
+            context.Output($"Workflow pod '{podName}' created successfully. Waiting for readiness and Pod IP...");
+
+            // Wait for readiness and resolve IP
+            string podIP = await WaitForPodIPAsync(client, podName, namespaceVal, context);
+
+            jobContainer.ContainerIP = podIP;
+            jobContainer.IsAlpine = false;
+            context.Debug($"Workflow pod resolved ContainerIP: {podIP}");
+        }
+
+        private V1Pod LoadTemplatePod(IExecutionContext context, string templatePath)
+        {
+            if (!File.Exists(templatePath))
+            {
+                return null;
+            }
+
+            try
+            {
+                var yamlContent = File.ReadAllText(templatePath);
+                var templatePod = k8s.KubernetesYaml.Deserialize<V1Pod>(yamlContent);
+                context.Debug($"Parsed template yaml from {templatePath}. Tolerations count: {templatePod?.Spec?.Tolerations?.Count ?? 0}");
+                if (templatePod?.Spec?.Tolerations != null)
+                {
+                    foreach (var t in templatePod.Spec.Tolerations)
+                    {
+                        context.Debug($"Template toleration: Key={t.Key}, Value={t.Value}, Operator={t.OperatorProperty}, Effect={t.Effect}");
+                    }
+                }
+                return templatePod;
+            }
+            catch (Exception ex)
+            {
+                context.Warning($"Warning: Failed to parse pod extension configuration template from {templatePath}: {ex.Message}");
+                return null;
+            }
+        }
+
+        private V1Pod BuildPodSpec(
+            IExecutionContext context, 
+            string podName, 
+            string runnerPodName, 
+            bool isMtlsEnabled, 
+            V1Pod templatePod, 
+            ContainerInfo jobContainer)
+        {
             var podVolumes = new List<V1Volume>
             {
                 new V1Volume { Name = "work", EmptyDir = new V1EmptyDirVolumeSource() }
             };
+            
             if (isMtlsEnabled)
             {
+                var mtlsSecretName = "certs-" + runnerPodName;
                 podVolumes.Add(new V1Volume
                 {
                     Name = "certs-volume",
@@ -80,6 +116,7 @@ namespace GitHub.Runner.Worker.Container
                     }
                 });
             }
+
             var pod = new V1Pod
             {
                 ApiVersion = "v1",
@@ -141,6 +178,7 @@ namespace GitHub.Runner.Worker.Container
                 pod.Spec.NodeSelector = templatePod.Spec.NodeSelector;
             }
 
+            // Setup Init Container (Workflow Agent Injector)
             var agentImage = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_WORKFLOW_AGENT_IMAGE");
             if (string.IsNullOrEmpty(agentImage))
             {
@@ -161,6 +199,7 @@ namespace GitHub.Runner.Worker.Container
                 }
             };
 
+            // Setup Main Job Container
             var agentPort = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_WORKFLOW_AGENT_PORT") ?? "50051";
 
             var workflowVolumeMounts = new List<V1VolumeMount>
@@ -179,7 +218,7 @@ namespace GitHub.Runner.Worker.Container
                     ReadOnlyProperty = true
                 });
             }
-            // Build job container spec
+
             var workflowContainer = new V1Container
             {
                 Name = "job",
@@ -200,15 +239,11 @@ namespace GitHub.Runner.Worker.Container
                 }
             }
 
-            context.Debug($"Creating GKE workflow pod {podName} using Kubernetes C# client...");
-            context.Output($"Creating workflow pod '{podName}'...");
-            await client.CoreV1.CreateNamespacedPodAsync(pod, namespaceVal);
+            return pod;
+        }
 
-            context.Debug($"Workflow pod {podName} created successfully. Waiting for readiness and Pod IP...");
-            context.Output($"Workflow pod '{podName}' created successfully. Waiting for readiness and Pod IP...");
-
-            // Wait for readiness and resolve IP
-            string podIP = null;
+        private async Task<string> WaitForPodIPAsync(Kubernetes client, string podName, string namespaceVal, IExecutionContext context)
+        {
             string lastPhase = null;
             var timeout = DateTime.UtcNow.AddMinutes(5);
             while (DateTime.UtcNow < timeout)
@@ -227,8 +262,7 @@ namespace GitHub.Runner.Worker.Container
 
                 if (string.Equals(phase, "Running", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(ip))
                 {
-                    podIP = ip;
-                    break;
+                    return ip;
                 }
                 else if (string.Equals(phase, "Failed", StringComparison.OrdinalIgnoreCase) ||
                          string.Equals(phase, "Unknown", StringComparison.OrdinalIgnoreCase))
@@ -237,14 +271,7 @@ namespace GitHub.Runner.Worker.Container
                 }
             }
 
-            if (string.IsNullOrEmpty(podIP))
-            {
-                throw new TimeoutException($"Timed out waiting for GKE workflow pod {podName} to come online and resolve IP.");
-            }
-
-            jobContainer.ContainerIP = podIP;
-            jobContainer.IsAlpine = false;
-            context.Debug($"Workflow pod resolved ContainerIP: {podIP}");
+            throw new TimeoutException($"Timed out waiting for GKE workflow pod {podName} to come online and resolve IP.");
         }
 
         public async Task CleanupJobAsync(IExecutionContext context, List<ContainerInfo> containers)

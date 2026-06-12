@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -21,6 +21,8 @@ namespace GitHub.Runner.Worker.Container
 
     public class KubernetesManager : RunnerService, IKubernetesManager
     {
+        private const string DefaultWorkflowAgentImage = "us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/workflow-agent:latest";
+
         public async Task PrepareJobAsync(IExecutionContext context, List<ContainerInfo> containers)
         {
             Trace.Entering();
@@ -34,25 +36,20 @@ namespace GitHub.Runner.Worker.Container
             jobContainer.ContainerId = podName;
             context.JobContext.Container["id"] = new StringContextData(podName);
 
-            var runnerPodName = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_POD_NAME");
-            bool isMtlsEnabled = !string.IsNullOrEmpty(runnerPodName) && Directory.Exists("/etc/certs");
-            var templatePath = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE") ?? "/etc/config/extension.yaml";
-            
-            V1Pod templatePod = LoadTemplatePod(context, templatePath);
-
             // Initialize official client with InCluster configuration
             var k8sConfig = KubernetesClientConfiguration.InClusterConfig();
             var client = new Kubernetes(k8sConfig);
             var namespaceVal = k8sConfig.Namespace ?? "default";
 
             // Build Pod object
-            var pod = BuildPodSpec(context, podName, runnerPodName, isMtlsEnabled, templatePod, jobContainer);
+            var pod = BuildPodSpec(context, podName, jobContainer);
 
-            context.Debug($"Creating GKE workflow pod {podName} using Kubernetes C# client...");
-            context.Output($"Creating workflow pod '{podName}'...");
-            await client.CoreV1.CreateNamespacedPodAsync(pod, namespaceVal);
+            context.Debug($"Creating workflow pod {podName} using Kubernetes C# client...");
+            await ExecuteK8sRequestAsync(context, async () =>
+            {
+                return await client.CoreV1.CreateNamespacedPodAsync(pod, namespaceVal);
+            });
 
-            context.Debug($"Workflow pod {podName} created successfully. Waiting for readiness and Pod IP...");
             context.Output($"Workflow pod '{podName}' created successfully. Waiting for readiness and Pod IP...");
 
             // Wait for readiness and resolve IP
@@ -60,29 +57,23 @@ namespace GitHub.Runner.Worker.Container
 
             jobContainer.ContainerIP = podIP;
             jobContainer.IsAlpine = false;
+            context.Output("Workflow pod is ready");
             context.Debug($"Workflow pod resolved ContainerIP: {podIP}");
         }
 
-        private V1Pod LoadTemplatePod(IExecutionContext context, string templatePath)
+        private V1Pod LoadTemplatePod(IExecutionContext context)
         {
+            var templatePath = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE") ?? "/etc/config/extension.yaml";
+
             if (!File.Exists(templatePath))
             {
+                context.Debug($"Pod extension configuration template file does not exist at '{templatePath}'. Skipping template loading.");
                 return null;
             }
 
             try
             {
-                var yamlContent = File.ReadAllText(templatePath);
-                var templatePod = k8s.KubernetesYaml.Deserialize<V1Pod>(yamlContent);
-                context.Debug($"Parsed template yaml from {templatePath}. Tolerations count: {templatePod?.Spec?.Tolerations?.Count ?? 0}");
-                if (templatePod?.Spec?.Tolerations != null)
-                {
-                    foreach (var t in templatePod.Spec.Tolerations)
-                    {
-                        context.Debug($"Template toleration: Key={t.Key}, Value={t.Value}, Operator={t.OperatorProperty}, Effect={t.Effect}");
-                    }
-                }
-                return templatePod;
+                return k8s.KubernetesYaml.Deserialize<V1Pod>(File.ReadAllText(templatePath));
             }
             catch (Exception ex)
             {
@@ -92,30 +83,16 @@ namespace GitHub.Runner.Worker.Container
         }
 
         private V1Pod BuildPodSpec(
-            IExecutionContext context, 
-            string podName, 
-            string runnerPodName, 
-            bool isMtlsEnabled, 
-            V1Pod templatePod, 
+            IExecutionContext context,
+            string podName,
             ContainerInfo jobContainer)
         {
-            var podVolumes = new List<V1Volume>
-            {
-                new V1Volume { Name = "work", EmptyDir = new V1EmptyDirVolumeSource() }
-            };
-            
-            if (isMtlsEnabled)
-            {
-                var mtlsSecretName = "certs-" + runnerPodName;
-                podVolumes.Add(new V1Volume
-                {
-                    Name = "certs-volume",
-                    Secret = new V1SecretVolumeSource
-                    {
-                        SecretName = mtlsSecretName
-                    }
-                });
-            }
+            V1Pod templatePod = LoadTemplatePod(context);
+
+            var runnerPodName = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_POD_NAME");
+            bool isMtlsEnabled = !string.IsNullOrEmpty(runnerPodName) && Directory.Exists("/etc/certs");
+
+            var podVolumes = GetPodVolumes(runnerPodName, isMtlsEnabled, templatePod);
 
             var pod = new V1Pod
             {
@@ -135,8 +112,65 @@ namespace GitHub.Runner.Worker.Container
                 }
             };
 
-            // Merge template metadata labels & annotations
-            if (templatePod?.Metadata != null)
+            MergeTemplate(pod, templatePod);
+
+            // Extract resource limits if defined in template
+            V1ResourceRequirements resources = null;
+            if (templatePod?.Spec?.Containers != null && templatePod.Spec.Containers.Count > 0)
+            {
+                resources = templatePod.Spec.Containers[0].Resources;
+            }
+
+            // Setup Init Container (Workflow Agent Injector)
+            var envAgentImage = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_WORKFLOW_AGENT_IMAGE");
+            var agentImage = string.IsNullOrEmpty(envAgentImage) ? DefaultWorkflowAgentImage : envAgentImage;
+            pod.Spec.InitContainers = new List<V1Container> { CreateInitContainer(agentImage) };
+
+            // Setup Main Job Container
+            pod.Spec.Containers.Add(CreateJobContainer(jobContainer, isMtlsEnabled, resources));
+
+            return pod;
+        }
+
+        private List<V1Volume> GetPodVolumes(string runnerPodName, bool isMtlsEnabled, V1Pod templatePod)
+        {
+            var podVolumes = new List<V1Volume>
+            {
+                new V1Volume { Name = "work", EmptyDir = new V1EmptyDirVolumeSource() }
+            };
+
+            if (isMtlsEnabled)
+            {
+                var mtlsSecretName = "certs-" + runnerPodName;
+                podVolumes.Add(new V1Volume
+                {
+                    Name = "certs-volume",
+                    Secret = new V1SecretVolumeSource
+                    {
+                        SecretName = mtlsSecretName
+                    }
+                });
+            }
+
+            if (templatePod?.Spec?.Volumes != null)
+            {
+                foreach (var v in templatePod.Spec.Volumes)
+                {
+                    podVolumes.Add(v);
+                }
+            }
+
+            return podVolumes;
+        }
+
+        private void MergeTemplate(V1Pod pod, V1Pod templatePod)
+        {
+            if (templatePod == null)
+            {
+                return;
+            }
+
+            if (templatePod.Metadata != null)
             {
                 if (templatePod.Metadata.Labels != null)
                 {
@@ -154,52 +188,30 @@ namespace GitHub.Runner.Worker.Container
                 }
             }
 
-            // Merge template volumes
-            if (templatePod?.Spec?.Volumes != null)
-            {
-                foreach (var v in templatePod.Spec.Volumes)
-                {
-                    pod.Spec.Volumes.Add(v);
-                }
-            }
-
-            // Extract resource limits if defined in template
-            V1ResourceRequirements resources = null;
-            if (templatePod?.Spec?.Containers != null && templatePod.Spec.Containers.Count > 0)
-            {
-                resources = templatePod.Spec.Containers[0].Resources;
-            }
-
-            // Merge pod-level execution specs
-            if (templatePod?.Spec != null)
+            if (templatePod.Spec != null)
             {
                 pod.Spec.Affinity = templatePod.Spec.Affinity;
                 pod.Spec.Tolerations = templatePod.Spec.Tolerations;
                 pod.Spec.NodeSelector = templatePod.Spec.NodeSelector;
             }
+        }
 
-            // Setup Init Container (Workflow Agent Injector)
-            var agentImage = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_WORKFLOW_AGENT_IMAGE");
-            if (string.IsNullOrEmpty(agentImage))
+        private V1Container CreateInitContainer(string agentImage)
+        {
+            return new V1Container
             {
-                agentImage = "us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/workflow-agent:latest";
-            }
-
-            pod.Spec.InitContainers = new List<V1Container>
-            {
-                new V1Container
+                Name = "agent-injector",
+                Image = agentImage,
+                Command = new List<string> { "sh", "-c", "cp /bin/workflow-agent /workflow/workflow-agent && cp -r /bin/externals /workflow/externals" },
+                VolumeMounts = new List<V1VolumeMount>
                 {
-                    Name = "agent-injector",
-                    Image = agentImage,
-                    Command = new List<string> { "sh", "-c", "cp /bin/workflow-agent /workflow/workflow-agent && cp -r /bin/externals /workflow/externals" },
-                    VolumeMounts = new List<V1VolumeMount>
-                    {
-                        new V1VolumeMount { Name = "work", MountPath = "/workflow" }
-                    }
+                    new V1VolumeMount { Name = "work", MountPath = "/workflow" }
                 }
             };
+        }
 
-            // Setup Main Job Container
+        private V1Container CreateJobContainer(ContainerInfo jobContainer, bool isMtlsEnabled, V1ResourceRequirements resources)
+        {
             var agentPort = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_WORKFLOW_AGENT_PORT") ?? "50051";
 
             var workflowVolumeMounts = new List<V1VolumeMount>
@@ -209,6 +221,7 @@ namespace GitHub.Runner.Worker.Container
                 new V1VolumeMount { Name = "work", MountPath = "/github/home", SubPath = "_temp/_github_home" },
                 new V1VolumeMount { Name = "work", MountPath = "/github/workflow", SubPath = "_temp/_github_workflow" }
             };
+
             if (isMtlsEnabled)
             {
                 workflowVolumeMounts.Add(new V1VolumeMount
@@ -219,7 +232,7 @@ namespace GitHub.Runner.Worker.Container
                 });
             }
 
-            var workflowContainer = new V1Container
+            return new V1Container
             {
                 Name = "job",
                 Image = jobContainer.ContainerImage,
@@ -228,18 +241,6 @@ namespace GitHub.Runner.Worker.Container
                 VolumeMounts = workflowVolumeMounts,
                 Resources = resources
             };
-            pod.Spec.Containers.Add(workflowContainer);
-
-            context.Debug($"Final pod spec tolerations count: {pod.Spec.Tolerations?.Count ?? 0}");
-            if (pod.Spec.Tolerations != null)
-            {
-                foreach (var t in pod.Spec.Tolerations)
-                {
-                    context.Debug($"Final pod toleration: Key={t.Key}, Value={t.Value}, Operator={t.OperatorProperty}, Effect={t.Effect}");
-                }
-            }
-
-            return pod;
         }
 
         private async Task<string> WaitForPodIPAsync(Kubernetes client, string podName, string namespaceVal, IExecutionContext context)
@@ -249,7 +250,10 @@ namespace GitHub.Runner.Worker.Container
             while (DateTime.UtcNow < timeout)
             {
                 await Task.Delay(2000);
-                var polledPod = await client.CoreV1.ReadNamespacedPodStatusAsync(podName, namespaceVal);
+                var polledPod = await ExecuteK8sRequestAsync(context, async () =>
+                {
+                    return await client.CoreV1.ReadNamespacedPodStatusAsync(podName, namespaceVal);
+                });
                 var phase = polledPod.Status?.Phase;
                 var ip = polledPod.Status?.PodIP;
 
@@ -272,6 +276,21 @@ namespace GitHub.Runner.Worker.Container
             }
 
             throw new TimeoutException($"Timed out waiting for GKE workflow pod {podName} to come online and resolve IP.");
+        }
+
+
+        private async Task<T> ExecuteK8sRequestAsync<T>(IExecutionContext context, Func<Task<T>> request)
+        {
+            try
+            {
+                return await request();
+            }
+            catch (k8s.Autorest.HttpOperationException ex)
+            {
+                var details = ex.Response?.Content ?? "No response body content";
+                context.Error($"Kubernetes API call failed. Error: {ex.Message}. Response details: {details}");
+                throw;
+            }
         }
 
         public async Task CleanupJobAsync(IExecutionContext context, List<ContainerInfo> containers)

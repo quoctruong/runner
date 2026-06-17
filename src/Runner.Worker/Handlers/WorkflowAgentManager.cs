@@ -16,6 +16,11 @@ namespace GitHub.Runner.Worker.Handlers
 {
     public class WorkflowAgentManager : RunnerService, IWorkflowAgentManager
     {
+        private const string CertsDirectory = "/etc/certs";
+        private const string CaCertPath = "/etc/certs/ca.crt";
+        private const string ClientCertPath = "/etc/certs/client.crt";
+        private const string ClientKeyPath = "/etc/certs/client.key";
+
         private readonly HashSet<string> _syncedDirectories = new(StringComparer.OrdinalIgnoreCase);
 
         private WorkflowAgent.WorkflowAgentClient GetGrpcClient(string podIP)
@@ -23,9 +28,9 @@ namespace GitHub.Runner.Worker.Handlers
             var agentPort = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_WORKFLOW_AGENT_PORT") ?? "50051";
             GrpcChannel channel;
 
-            if (!Directory.Exists("/etc/certs") || !File.Exists("/etc/certs/ca.crt") || !File.Exists("/etc/certs/client.crt") || !File.Exists("/etc/certs/client.key"))
+            if (!Directory.Exists(CertsDirectory) || !File.Exists(CaCertPath) || !File.Exists(ClientCertPath) || !File.Exists(ClientKeyPath))
             {
-                throw new InvalidOperationException("mTLS certificates not found in '/etc/certs'. Transport encryption is strictly required.");
+                throw new InvalidOperationException($"mTLS certificates not found in '{CertsDirectory}'. Transport encryption is strictly required.");
             }
 
             var handler = new SocketsHttpHandler
@@ -37,10 +42,10 @@ namespace GitHub.Runner.Worker.Handlers
             try
             {
                 var clientCert = System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPemFile(
-                    "/etc/certs/client.crt",
-                    "/etc/certs/client.key"
+                    ClientCertPath,
+                    ClientKeyPath
                 );
-                var caCert = new System.Security.Cryptography.X509Certificates.X509Certificate2("/etc/certs/ca.crt");
+                var caCert = new System.Security.Cryptography.X509Certificates.X509Certificate2(CaCertPath);
 
                 handler.SslOptions = new System.Net.Security.SslClientAuthenticationOptions
                 {

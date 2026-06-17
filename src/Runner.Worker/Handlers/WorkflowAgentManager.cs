@@ -216,6 +216,7 @@ namespace GitHub.Runner.Worker.Handlers
 
             foreach (var env in environment)
             {
+                // Protobuf MapField throws ArgumentNullException if null values are inserted.
                 request.Environment.Add(env.Key, env.Value ?? string.Empty);
             }
 
@@ -229,6 +230,8 @@ namespace GitHub.Runner.Worker.Handlers
                         var data = response.Data;
                         if (data != null)
                         {
+                            // The Go gRPC server streams complete lines ending in \n.
+                            // Stripping trailing newlines is required to match standard .NET Process.OutputDataReceived behavior.
                             onOutput?.Invoke(data.TrimEnd('\r', '\n'));
                         }
                     }
@@ -258,7 +261,8 @@ namespace GitHub.Runner.Worker.Handlers
             {
                 try
                 {
-                    var containerPath = "/github/workflow/event.json";
+                    var fileName = string.IsNullOrEmpty(localFilePath) ? "event.json" : Path.GetFileName(localFilePath);
+                    var containerPath = $"/github/workflow/{fileName}";
                     context.Debug($"Syncing event payload to workflow pod: {containerPath}");
                     using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(content ?? string.Empty)))
                     {

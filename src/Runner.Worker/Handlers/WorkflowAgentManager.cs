@@ -1,0 +1,228 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Net.Http;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using GitHub.Runner.Common;
+using GitHub.Runner.Worker;
+using GitHub.Runner.Worker.Container;
+using GitHub.Runner.Worker.Protos;
+using Grpc.Core;
+using Grpc.Net.Client;
+
+namespace GitHub.Runner.Worker.Handlers
+{
+    public class WorkflowAgentManager : RunnerService, IWorkflowAgentManager
+    {
+        private const string CertsDirectory = "/etc/certs";
+        private const string CaCertPath = "/etc/certs/ca.crt";
+        private const string ClientCertPath = "/etc/certs/client.crt";
+        private const string ClientKeyPath = "/etc/certs/client.key";
+        private const int ChunkSize = 64 * 1024;
+
+        private readonly HashSet<string> _syncedDirectories = new(StringComparer.OrdinalIgnoreCase);
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, GrpcChannel> _channels = new(StringComparer.OrdinalIgnoreCase);
+        private System.Security.Cryptography.X509Certificates.X509Certificate2 _clientCert;
+        private System.Security.Cryptography.X509Certificates.X509Certificate2 _caCert;
+        private readonly object _certLock = new object();
+
+        private WorkflowAgent.WorkflowAgentClient GetGrpcClient(string podIP)
+        {
+            var channel = _channels.GetOrAdd(podIP, CreateGrpcChannel);
+            return new WorkflowAgent.WorkflowAgentClient(channel);
+        }
+
+        private GrpcChannel CreateGrpcChannel(string ip)
+        {
+            var agentPort = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_WORKFLOW_AGENT_PORT") ?? "50051";
+
+            EnsureCertificatesLoaded();
+
+            var handler = new SocketsHttpHandler
+            {
+                KeepAlivePingDelay = TimeSpan.FromSeconds(30),
+                KeepAlivePingTimeout = TimeSpan.FromSeconds(10),
+                KeepAlivePingPolicy = HttpKeepAlivePingPolicy.Always
+            };
+
+            try
+            {
+                var targetHost = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_POD_NAME")?.Replace("runner-", "workflow-agent-") ?? "workflow-agent";
+                handler.SslOptions = new System.Net.Security.SslClientAuthenticationOptions
+                {
+                    TargetHost = targetHost,
+                    ClientCertificates = new System.Security.Cryptography.X509Certificates.X509Certificate2Collection { _clientCert },
+                    RemoteCertificateValidationCallback = ValidateServerCertificate
+                };
+
+                return GrpcChannel.ForAddress($"https://{ip}:{agentPort}", new GrpcChannelOptions
+                {
+                    HttpHandler = handler
+                });
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Failed to initialize secure mTLS connection: {ex.Message}", ex);
+            }
+        }
+
+        private void EnsureCertificatesLoaded()
+        {
+            if (!Directory.Exists(CertsDirectory) || !File.Exists(CaCertPath) || !File.Exists(ClientCertPath) || !File.Exists(ClientKeyPath))
+            {
+                throw new InvalidOperationException($"mTLS certificates not found in '{CertsDirectory}'. Transport encryption is strictly required.");
+            }
+
+            lock (_certLock)
+            {
+                if (_clientCert == null)
+                {
+                    _clientCert = System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPemFile(
+                        ClientCertPath,
+                        ClientKeyPath
+                    );
+                }
+                if (_caCert == null)
+                {
+                    _caCert = new System.Security.Cryptography.X509Certificates.X509Certificate2(CaCertPath);
+                }
+            }
+        }
+
+        private bool ValidateServerCertificate(object sender, System.Security.Cryptography.X509Certificates.X509Certificate certificate, System.Security.Cryptography.X509Certificates.X509Chain chain, System.Net.Security.SslPolicyErrors errors)
+        {
+            if (certificate == null)
+            {
+                Trace.Info("mTLS server certificate verification failed: server certificate is null.");
+                return false;
+            }
+
+            Trace.Info($"mTLS validating server certificate '{certificate.Subject}' against CA '{_caCert.Subject}'...");
+            var chainPolicy = new System.Security.Cryptography.X509Certificates.X509ChainPolicy
+            {
+                RevocationMode = System.Security.Cryptography.X509Certificates.X509RevocationMode.NoCheck,
+                VerificationFlags = System.Security.Cryptography.X509Certificates.X509VerificationFlags.AllowUnknownCertificateAuthority
+            };
+            chainPolicy.ExtraStore.Add(_caCert);
+
+            using (var x509Chain = new System.Security.Cryptography.X509Certificates.X509Chain { ChainPolicy = chainPolicy })
+            using (var targetCert = new System.Security.Cryptography.X509Certificates.X509Certificate2(certificate))
+            {
+                bool isValid = x509Chain.Build(targetCert);
+                if (!isValid)
+                {
+                    Trace.Info("mTLS server certificate verification failed: X509Chain build failed.");
+                    return false;
+                }
+
+                foreach (var element in x509Chain.ChainElements)
+                {
+                    if (element.Certificate.Thumbprint == _caCert.Thumbprint)
+                    {
+                        Trace.Info("mTLS server certificate verification succeeded: resolved to trusted CA.");
+                        return true;
+                    }
+                }
+                Trace.Info("mTLS server certificate verification failed: certificate chain did not resolve to the trusted CA.");
+                return false;
+            }
+        }
+
+        private Metadata GetHeaders()
+        {
+            var headers = new Metadata();
+            var token = Environment.GetEnvironmentVariable(Constants.Variables.Actions.SecurityToken);
+            if (!string.IsNullOrEmpty(token))
+            {
+                headers.Add("x-actions-runner-token", token);
+            }
+            return headers;
+        }
+
+        public async Task WriteFileAsync(string podIP, string path, Stream content)
+        {
+            var client = GetGrpcClient(podIP);
+            using (var call = client.WriteFile(headers: GetHeaders()))
+            {
+                await call.RequestStream.WriteAsync(new WriteFileRequest { Path = path });
+
+                var buffer = new byte[ChunkSize];
+                int bytesRead;
+                while ((bytesRead = await content.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                {
+                    await call.RequestStream.WriteAsync(new WriteFileRequest { Chunk = Google.Protobuf.ByteString.CopyFrom(buffer, 0, bytesRead) });
+                }
+
+                await call.RequestStream.CompleteAsync();
+                var response = await call.ResponseAsync;
+                if (response == null || !response.Success)
+                {
+                    throw new InvalidOperationException("WriteFile failed: server returned success = false");
+                }
+            }
+        }
+
+        public async Task ReadFileAsync(string podIP, string path, Stream outputStream)
+        {
+            var client = GetGrpcClient(podIP);
+            var request = new ReadFileRequest
+            {
+                Path = path
+            };
+            using (var call = client.ReadFile(request, headers: GetHeaders()))
+            {
+                while (await call.ResponseStream.MoveNext(default))
+                {
+                    var chunk = call.ResponseStream.Current.Chunk;
+                    if (chunk != null)
+                    {
+                        chunk.WriteTo(outputStream);
+                    }
+                }
+            }
+        }
+
+        public Task<int> ExecuteAsync(
+            IExecutionContext context,
+            ContainerInfo container,
+            string workingDirectory,
+            string fileName,
+            string arguments,
+            IDictionary<string, string> environment,
+            string standardInInput,
+            string prependPath,
+            Action<string> onOutput,
+            Action<string> onError,
+            CancellationToken cancellationToken)
+        {
+            throw new NotImplementedException();
+        }
+
+        public Task SyncWebhookPayloadAsync(IExecutionContext context, string localFilePath, string content)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void InitializeFileCommand(IExecutionContext context, ContainerInfo container, string hostPath, string contextName)
+        {
+            throw new NotImplementedException();
+        }
+
+        public Task SyncFileCommandsFromWorkflowPodAsync(IExecutionContext context, ContainerInfo container, string fileCommandDirectory, string fileSuffix, IEnumerable<IFileCommandExtension> commandExtensions)
+        {
+            throw new NotImplementedException();
+        }
+
+        public Task SyncFileToWorkflowPodAsync(IExecutionContext context, string hostPath)
+        {
+            throw new NotImplementedException();
+        }
+
+        public Task SyncDirectoryToWorkflowPodAsync(IExecutionContext context, string hostDirectory)
+        {
+            throw new NotImplementedException();
+        }
+    }
+}

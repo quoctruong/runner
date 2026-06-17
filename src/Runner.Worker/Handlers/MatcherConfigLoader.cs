@@ -46,7 +46,9 @@ namespace GitHub.Runner.Worker.Handlers
 
             try
             {
-                var content = workflowAgentManager.ReadFileAsync(container.ContainerIP, containerPath).GetAwaiter().GetResult();
+                using var ms = new MemoryStream();
+                workflowAgentManager.ReadFileAsync(container.ContainerIP, containerPath, ms).GetAwaiter().GetResult();
+                var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
                 return StringUtil.ConvertFromJson<IssueMatchersConfig>(content);
             }
             catch (Exception ex)

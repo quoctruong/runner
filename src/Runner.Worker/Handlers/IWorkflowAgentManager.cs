@@ -7,7 +7,7 @@ using GitHub.Runner.Worker.Container;
 
 namespace GitHub.Runner.Worker.Handlers
 {
-    // [ServiceLocator(Default = typeof(WorkflowAgentManager))]
+    [ServiceLocator(Default = typeof(WorkflowAgentManager))]
     public interface IWorkflowAgentManager : IRunnerService
     {
         Task WriteFileAsync(string podIP, string path, string content);

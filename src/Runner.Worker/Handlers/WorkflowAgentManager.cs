@@ -286,14 +286,91 @@ namespace GitHub.Runner.Worker.Handlers
             throw new NotImplementedException();
         }
 
-        public Task SyncFileToWorkflowPodAsync(IExecutionContext context, string hostPath)
+        public async Task SyncFileToWorkflowPodAsync(IExecutionContext context, string hostPath)
         {
-            throw new NotImplementedException();
+            if (!FeatureManager.IsNoSharedVolumeEnabled()) return;
+
+            var podIP = context.Global.Container?.ContainerIP;
+            if (string.IsNullOrEmpty(podIP) || string.IsNullOrEmpty(hostPath) || !File.Exists(hostPath)) return;
+
+            context.Debug($"Syncing file to workflow pod: {hostPath}");
+            using (var stream = File.OpenRead(hostPath))
+            {
+                await WriteFileAsync(podIP, hostPath, stream);
+            }
         }
 
-        public Task SyncDirectoryToWorkflowPodAsync(IExecutionContext context, string hostDirectory)
+        public async Task SyncDirectoryToWorkflowPodAsync(IExecutionContext context, string hostDirectory)
         {
-            throw new NotImplementedException();
+            if (!FeatureManager.IsNoSharedVolumeEnabled()) return;
+
+            var podIP = context.Global.Container?.ContainerIP;
+            if (string.IsNullOrEmpty(podIP) || string.IsNullOrEmpty(hostDirectory) || !Directory.Exists(hostDirectory)) return;
+
+            lock (_syncedDirectories)
+            {
+                if (_syncedDirectories.Contains(hostDirectory))
+                {
+                    context.Debug($"Directory '{hostDirectory}' has already been synced to workflow pod.");
+                    return;
+                }
+                _syncedDirectories.Add(hostDirectory);
+            }
+
+            context.Debug($"Syncing directory tarball to workflow pod: {hostDirectory}");
+            var tempDirectory = HostContext.GetDirectory(WellKnownDirectory.Temp);
+            var tempTarPath = Path.Combine(tempDirectory, $"{Guid.NewGuid():N}.tar");
+            var remoteTarPath = $"/tmp/{Guid.NewGuid():N}.tar";
+
+            try
+            {
+                System.Formats.Tar.TarFile.CreateFromDirectory(hostDirectory, tempTarPath, false);
+
+                using (var stream = File.OpenRead(tempTarPath))
+                {
+                    await WriteFileAsync(podIP, remoteTarPath, stream);
+                }
+
+                await ExecuteAsync(
+                    context,
+                    context.Global.Container,
+                    hostDirectory,
+                    "tar",
+                    $"-xf \"{remoteTarPath}\" -C \"{hostDirectory}\"",
+                    new Dictionary<string, string>(),
+                    null,
+                    null,
+                    output => context.Debug($"tar stdout: {output}"),
+                    error => context.Debug($"tar stderr: {error}"),
+                    default);
+
+                await ExecuteAsync(
+                    context,
+                    context.Global.Container,
+                    "/tmp",
+                    "rm",
+                    $"-f \"{remoteTarPath}\"",
+                    new Dictionary<string, string>(),
+                    null,
+                    null,
+                    null,
+                    null,
+                    default);
+            }
+            finally
+            {
+                try
+                {
+                    if (File.Exists(tempTarPath))
+                    {
+                        File.Delete(tempTarPath);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    context.Debug($"Failed to delete local temporary tarball '{tempTarPath}': {ex.Message}");
+                }
+            }
         }
     }
 }

@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,9 +11,9 @@ namespace GitHub.Runner.Worker.Handlers
     [ServiceLocator(Default = typeof(WorkflowAgentManager))]
     public interface IWorkflowAgentManager : IRunnerService
     {
-        Task WriteFileAsync(string podIP, string path, string content);
+        Task WriteFileAsync(string podIP, string path, Stream content);
 
-        Task<string> ReadFileAsync(string podIP, string path);
+        Task ReadFileAsync(string podIP, string path, Stream outputStream);
 
         Task<int> ExecuteAsync(
             IExecutionContext context,

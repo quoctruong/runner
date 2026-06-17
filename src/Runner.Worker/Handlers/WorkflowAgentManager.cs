@@ -141,18 +141,18 @@ namespace GitHub.Runner.Worker.Handlers
             return headers;
         }
 
-        public async Task WriteFileAsync(string podIP, string path, string content)
+        public async Task WriteFileAsync(string podIP, string path, Stream content)
         {
             var client = GetGrpcClient(podIP);
             using (var call = client.WriteFile(headers: GetHeaders()))
             {
                 await call.RequestStream.WriteAsync(new WriteFileRequest { Path = path });
 
-                var bytes = Encoding.UTF8.GetBytes(content ?? string.Empty);
-                for (int i = 0; i < bytes.Length; i += ChunkSize)
+                var buffer = new byte[ChunkSize];
+                int bytesRead;
+                while ((bytesRead = await content.ReadAsync(buffer, 0, buffer.Length)) > 0)
                 {
-                    int length = Math.Min(ChunkSize, bytes.Length - i);
-                    await call.RequestStream.WriteAsync(new WriteFileRequest { Chunk = Google.Protobuf.ByteString.CopyFrom(bytes, i, length) });
+                    await call.RequestStream.WriteAsync(new WriteFileRequest { Chunk = Google.Protobuf.ByteString.CopyFrom(buffer, 0, bytesRead) });
                 }
 
                 await call.RequestStream.CompleteAsync();
@@ -164,7 +164,7 @@ namespace GitHub.Runner.Worker.Handlers
             }
         }
 
-        public async Task<string> ReadFileAsync(string podIP, string path)
+        public async Task ReadFileAsync(string podIP, string path, Stream outputStream)
         {
             var client = GetGrpcClient(podIP);
             var request = new ReadFileRequest
@@ -173,17 +173,13 @@ namespace GitHub.Runner.Worker.Handlers
             };
             using (var call = client.ReadFile(request, headers: GetHeaders()))
             {
-                using (var ms = new MemoryStream())
+                while (await call.ResponseStream.MoveNext(default))
                 {
-                    while (await call.ResponseStream.MoveNext(default))
+                    var chunk = call.ResponseStream.Current.Chunk;
+                    if (chunk != null)
                     {
-                        var chunk = call.ResponseStream.Current.Chunk;
-                        if (chunk != null)
-                        {
-                            chunk.WriteTo(ms);
-                        }
+                        chunk.WriteTo(outputStream);
                     }
-                    return Encoding.UTF8.GetString(ms.ToArray());
                 }
             }
         }

@@ -11,7 +11,7 @@ namespace GitHub.Runner.Worker.Handlers
     [ServiceLocator(Default = typeof(WorkflowAgentManager))]
     public interface IWorkflowAgentManager : IRunnerService
     {
-        Task WriteFileAsync(string podIP, string path, Stream content);
+        Task WriteFileAsync(string podIP, string path, Stream content, bool extractTar = false);
 
         Task ReadFileAsync(string podIP, string path, Stream outputStream);
 

@@ -141,12 +141,12 @@ namespace GitHub.Runner.Worker.Handlers
             return headers;
         }
 
-        public async Task WriteFileAsync(string podIP, string path, Stream content)
+        public async Task WriteFileAsync(string podIP, string path, Stream content, bool extractTar = false)
         {
             var client = GetGrpcClient(podIP);
             using (var call = client.WriteFile(headers: GetHeaders()))
             {
-                await call.RequestStream.WriteAsync(new WriteFileRequest { Path = path });
+                await call.RequestStream.WriteAsync(new WriteFileRequest { Path = path, ExtractTar = extractTar });
 
                 var buffer = new byte[ChunkSize];
                 int bytesRead;
@@ -320,29 +320,34 @@ namespace GitHub.Runner.Worker.Handlers
                 }
             }
 
-            var files = Directory.GetFiles(hostDirectory, "*", SearchOption.AllDirectories);
-            context.Debug($"Syncing {files.Length} files under '{hostDirectory}' to workflow pod IP '{podIP}'...");
+            context.Debug($"Syncing directory tarball to workflow pod: {hostDirectory}");
+            var tempDirectory = HostContext.GetDirectory(WellKnownDirectory.Temp);
+            var tempTarPath = Path.Combine(tempDirectory, $"{Guid.NewGuid():N}.tar");
 
-            var parallelOptions = new ParallelOptions
+            try
             {
-                MaxDegreeOfParallelism = 16
-            };
+                System.Formats.Tar.TarFile.CreateFromDirectory(hostDirectory, tempTarPath, false);
 
-            await Parallel.ForEachAsync(files, parallelOptions, async (filePath, token) =>
+                var resolvedDirectory = context.Global.Container?.TranslateToContainerPath(hostDirectory) ?? hostDirectory;
+                using (var stream = File.OpenRead(tempTarPath))
+                {
+                    await WriteFileAsync(podIP, resolvedDirectory, stream, extractTar: true);
+                }
+            }
+            finally
             {
-                var resolvedPath = context.Global.Container?.TranslateToContainerPath(filePath) ?? filePath;
                 try
                 {
-                    using (var stream = File.OpenRead(filePath))
+                    if (File.Exists(tempTarPath))
                     {
-                        await WriteFileAsync(podIP, resolvedPath, stream);
+                        File.Delete(tempTarPath);
                     }
                 }
                 catch (Exception ex)
                 {
-                    context.Warning($"Failed to sync file '{filePath}' to workflow pod: {ex.Message}");
+                    context.Debug($"Failed to delete local temporary tarball '{tempTarPath}': {ex.Message}");
                 }
-            });
+            }
 
             context.Debug($"Finished syncing directory '{hostDirectory}'.");
         }

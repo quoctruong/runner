@@ -16,6 +16,7 @@ message WriteFileRequest {
         string path = 1;
         bytes chunk = 2;
     }
+    bool extract_tar = 3;
 }
 
 message WriteFileResponse {

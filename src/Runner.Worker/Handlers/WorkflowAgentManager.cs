@@ -22,85 +22,101 @@ namespace GitHub.Runner.Worker.Handlers
         private const string ClientKeyPath = "/etc/certs/client.key";
 
         private readonly HashSet<string> _syncedDirectories = new(StringComparer.OrdinalIgnoreCase);
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, GrpcChannel> _channels = new(StringComparer.OrdinalIgnoreCase);
+        private System.Security.Cryptography.X509Certificates.X509Certificate2 _clientCert;
+        private System.Security.Cryptography.X509Certificates.X509Certificate2 _caCert;
+        private readonly object _certLock = new object();
 
         private WorkflowAgent.WorkflowAgentClient GetGrpcClient(string podIP)
         {
-            var agentPort = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_WORKFLOW_AGENT_PORT") ?? "50051";
-            GrpcChannel channel;
-
-            if (!Directory.Exists(CertsDirectory) || !File.Exists(CaCertPath) || !File.Exists(ClientCertPath) || !File.Exists(ClientKeyPath))
+            var channel = _channels.GetOrAdd(podIP, ip =>
             {
-                throw new InvalidOperationException($"mTLS certificates not found in '{CertsDirectory}'. Transport encryption is strictly required.");
-            }
+                var agentPort = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_WORKFLOW_AGENT_PORT") ?? "50051";
 
-            var handler = new SocketsHttpHandler
-            {
-                KeepAlivePingDelay = TimeSpan.FromSeconds(30),
-                KeepAlivePingTimeout = TimeSpan.FromSeconds(10),
-                KeepAlivePingPolicy = HttpKeepAlivePingPolicy.Always
-            };
-            try
-            {
-                var clientCert = System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPemFile(
-                    ClientCertPath,
-                    ClientKeyPath
-                );
-                var caCert = new System.Security.Cryptography.X509Certificates.X509Certificate2(CaCertPath);
-
-                handler.SslOptions = new System.Net.Security.SslClientAuthenticationOptions
+                if (!Directory.Exists(CertsDirectory) || !File.Exists(CaCertPath) || !File.Exists(ClientCertPath) || !File.Exists(ClientKeyPath))
                 {
-                    ClientCertificates = new System.Security.Cryptography.X509Certificates.X509Certificate2Collection { clientCert },
-                    RemoteCertificateValidationCallback = (sender, certificate, chain, errors) =>
+                    throw new InvalidOperationException($"mTLS certificates not found in '{CertsDirectory}'. Transport encryption is strictly required.");
+                }
+
+                lock (_certLock)
+                {
+                    if (_clientCert == null)
                     {
-                        if (certificate == null)
-                        {
-                            Trace.Info("mTLS server certificate verification failed: server certificate is null.");
-                            return false;
-                        }
+                        _clientCert = System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPemFile(
+                            ClientCertPath,
+                            ClientKeyPath
+                        );
+                    }
+                    if (_caCert == null)
+                    {
+                        _caCert = new System.Security.Cryptography.X509Certificates.X509Certificate2(CaCertPath);
+                    }
+                }
 
-                        Trace.Info($"mTLS validating server certificate '{certificate.Subject}' against CA '{caCert.Subject}'...");
-                        var chainPolicy = new System.Security.Cryptography.X509Certificates.X509ChainPolicy
+                var handler = new SocketsHttpHandler
+                {
+                    KeepAlivePingDelay = TimeSpan.FromSeconds(30),
+                    KeepAlivePingTimeout = TimeSpan.FromSeconds(10),
+                    KeepAlivePingPolicy = HttpKeepAlivePingPolicy.Always
+                };
+                try
+                {
+                    var targetHost = Environment.GetEnvironmentVariable("ACTIONS_RUNNER_POD_NAME")?.Replace("runner-", "workflow-agent-") ?? "workflow-agent";
+                    handler.SslOptions = new System.Net.Security.SslClientAuthenticationOptions
+                    {
+                        TargetHost = targetHost,
+                        ClientCertificates = new System.Security.Cryptography.X509Certificates.X509Certificate2Collection { _clientCert },
+                        RemoteCertificateValidationCallback = (sender, certificate, chain, errors) =>
                         {
-                            RevocationMode = System.Security.Cryptography.X509Certificates.X509RevocationMode.NoCheck,
-                            VerificationFlags = System.Security.Cryptography.X509Certificates.X509VerificationFlags.AllowUnknownCertificateAuthority
-                        };
-                        chainPolicy.ExtraStore.Add(caCert);
-
-                        var x509Chain = new System.Security.Cryptography.X509Certificates.X509Chain
-                        {
-                            ChainPolicy = chainPolicy
-                        };
-
-                        var targetCert = new System.Security.Cryptography.X509Certificates.X509Certificate2(certificate);
-                        bool isValid = x509Chain.Build(targetCert);
-                        if (!isValid)
-                        {
-                            Trace.Info("mTLS server certificate verification failed: X509Chain build failed.");
-                            return false;
-                        }
-
-                        foreach (var element in x509Chain.ChainElements)
-                        {
-                            if (element.Certificate.Thumbprint == caCert.Thumbprint)
+                            if (certificate == null)
                             {
-                                Trace.Info("mTLS server certificate verification succeeded: resolved to trusted CA.");
-                                return true;
+                                Trace.Info("mTLS server certificate verification failed: server certificate is null.");
+                                return false;
+                            }
+
+                            Trace.Info($"mTLS validating server certificate '{certificate.Subject}' against CA '{_caCert.Subject}'...");
+                            var chainPolicy = new System.Security.Cryptography.X509Certificates.X509ChainPolicy
+                            {
+                                RevocationMode = System.Security.Cryptography.X509Certificates.X509RevocationMode.NoCheck,
+                                VerificationFlags = System.Security.Cryptography.X509Certificates.X509VerificationFlags.AllowUnknownCertificateAuthority
+                            };
+                            chainPolicy.ExtraStore.Add(_caCert);
+
+                            using (var x509Chain = new System.Security.Cryptography.X509Certificates.X509Chain { ChainPolicy = chainPolicy })
+                            using (var targetCert = new System.Security.Cryptography.X509Certificates.X509Certificate2(certificate))
+                            {
+                                bool isValid = x509Chain.Build(targetCert);
+                                if (!isValid)
+                                {
+                                    Trace.Info("mTLS server certificate verification failed: X509Chain build failed.");
+                                    return false;
+                                }
+
+                                foreach (var element in x509Chain.ChainElements)
+                                {
+                                    if (element.Certificate.Thumbprint == _caCert.Thumbprint)
+                                    {
+                                        Trace.Info("mTLS server certificate verification succeeded: resolved to trusted CA.");
+                                        return true;
+                                    }
+                                }
+                                Trace.Info("mTLS server certificate verification failed: certificate chain did not resolve to the trusted CA.");
+                                return false;
                             }
                         }
-                        Trace.Info("mTLS server certificate verification failed: certificate chain did not resolve to the trusted CA.");
-                        return false;
-                    }
-                };
+                    };
 
-                channel = GrpcChannel.ForAddress($"https://{podIP}:{agentPort}", new GrpcChannelOptions
+                    return GrpcChannel.ForAddress($"https://{ip}:{agentPort}", new GrpcChannelOptions
+                    {
+                        HttpHandler = handler
+                    });
+                }
+                catch (Exception ex)
                 {
-                    HttpHandler = handler
-                });
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException($"Failed to initialize secure mTLS connection: {ex.Message}", ex);
-            }
+                    throw new InvalidOperationException($"Failed to initialize secure mTLS connection: {ex.Message}", ex);
+                }
+            });
+
             return new WorkflowAgent.WorkflowAgentClient(channel);
         }
 

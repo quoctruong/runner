@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -305,8 +305,32 @@ namespace GitHub.Runner.Worker.Container
 
         public async Task CleanupJobAsync(IExecutionContext context, List<ContainerInfo> containers)
         {
-            // Stub: to be implemented in PR 8
-            await Task.CompletedTask;
+            Trace.Entering();
+            var jobContainer = containers.Where(c => c.IsJobContainer).SingleOrDefault();
+            if (jobContainer == null || string.IsNullOrEmpty(jobContainer.ContainerId))
+            {
+                return;
+            }
+
+            var podName = jobContainer.ContainerId;
+            context.Debug($"Native Kubernetes pod cleanup triggered. Deleting workflow pod: {podName}");
+
+            try
+            {
+                var k8sConfig = KubernetesClientConfiguration.InClusterConfig();
+                var client = new Kubernetes(k8sConfig);
+                var namespaceVal = k8sConfig.Namespace ?? "default";
+
+                await ExecuteK8sRequestAsync(context, async () =>
+                {
+                    return await client.CoreV1.DeleteNamespacedPodAsync(podName, namespaceVal);
+                });
+                context.Debug($"Successfully deleted Kubernetes workflow pod: {podName}");
+            }
+            catch (Exception ex)
+            {
+                context.Warning($"Warning: Failed to delete Kubernetes workflow pod {podName}: {ex.Message}");
+            }
         }
     }
 }

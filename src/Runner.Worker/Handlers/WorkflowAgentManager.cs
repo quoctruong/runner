@@ -309,9 +309,10 @@ namespace GitHub.Runner.Worker.Handlers
 
             var normalizedDirectory = Path.GetFullPath(hostDirectory);
             var actionsDir = Path.GetFullPath(HostContext.GetDirectory(WellKnownDirectory.Actions));
-            bool isImmutableAction = normalizedDirectory.StartsWith(actionsDir, StringComparison.OrdinalIgnoreCase);
 
-            if (isImmutableAction)
+            // Third-party downloaded actions under '_actions/' are immutable for a given job execution.
+            // We cache and sync them only once per workflow pod to avoid redundant network transfers across steps.
+            if (normalizedDirectory.StartsWith(actionsDir, StringComparison.OrdinalIgnoreCase))
             {
                 if (!_syncedDirectories.TryAdd(normalizedDirectory, 0))
                 {

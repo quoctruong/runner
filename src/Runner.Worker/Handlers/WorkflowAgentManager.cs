@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading;
@@ -278,12 +279,64 @@ namespace GitHub.Runner.Worker.Handlers
 
         public void InitializeFileCommand(IExecutionContext context, ContainerInfo container, string hostPath, string contextName)
         {
-            throw new NotImplementedException();
+            if (!FeatureManager.IsNoSharedVolumeEnabled()) return;
+
+            var podIP = container?.ContainerIP ?? context.Global.Container?.ContainerIP;
+            if (string.IsNullOrEmpty(podIP)) return;
+
+            var containerPath = container?.TranslateToContainerPath(hostPath) ?? hostPath;
+            context.Debug($"Initializing file command '{contextName}' at '{containerPath}' on pod IP '{podIP}'");
+
+            Task.Run(async () =>
+            {
+                try
+                {
+                    using (var stream = new MemoryStream())
+                    {
+                        await WriteFileAsync(podIP, containerPath, stream);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    context.Warning($"Failed to initialize file command '{contextName}' on workflow pod: {ex.Message}");
+                }
+            }).GetAwaiter().GetResult();
         }
 
-        public Task SyncFileCommandsFromWorkflowPodAsync(IExecutionContext context, ContainerInfo container, string fileCommandDirectory, string fileSuffix, IEnumerable<IFileCommandExtension> commandExtensions)
+        public async Task SyncFileCommandsFromWorkflowPodAsync(IExecutionContext context, ContainerInfo container, string fileCommandDirectory, string fileSuffix, IEnumerable<IFileCommandExtension> commandExtensions)
         {
-            throw new NotImplementedException();
+            if (!FeatureManager.IsNoSharedVolumeEnabled() || commandExtensions == null) return;
+
+            var podIP = container?.ContainerIP ?? context.Global.Container?.ContainerIP;
+            if (string.IsNullOrEmpty(podIP)) return;
+
+            var tasks = commandExtensions.Select(fileCommand =>
+            {
+                var hostPath = Path.Combine(fileCommandDirectory, fileCommand.FilePrefix + fileSuffix);
+                var remotePath = container?.TranslateToContainerPath(hostPath) ?? hostPath;
+
+                return Task.Run(async () =>
+                {
+                    try
+                    {
+                        context.Debug($"Syncing file command '{fileCommand.ContextName}' from remote '{remotePath}' -> local '{hostPath}'");
+                        using (var localFileStream = new FileStream(hostPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                        {
+                            await ReadFileAsync(podIP, remotePath, localFileStream);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        context.Debug($"No remote file command output retrieved for '{fileCommand.ContextName}': {ex.Message}");
+                        if (!File.Exists(hostPath))
+                        {
+                            File.WriteAllBytes(hostPath, Array.Empty<byte>());
+                        }
+                    }
+                });
+            });
+
+            await Task.WhenAll(tasks);
         }
 
         public async Task SyncFileToWorkflowPodAsync(IExecutionContext context, string hostPath)

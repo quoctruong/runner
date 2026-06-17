@@ -327,7 +327,7 @@ namespace GitHub.Runner.Worker.Handlers
 
             try
             {
-                System.Formats.Tar.TarFile.CreateFromDirectory(hostDirectory, tempTarPath, false);
+                await System.Formats.Tar.TarFile.CreateFromDirectoryAsync(hostDirectory, tempTarPath, false);
 
                 var resolvedDirectory = context.Global.Container?.TranslateToContainerPath(hostDirectory) ?? hostDirectory;
                 using (var stream = File.OpenRead(tempTarPath))

@@ -20,6 +20,7 @@ namespace GitHub.Runner.Worker.Handlers
         private const string CaCertPath = "/etc/certs/ca.crt";
         private const string ClientCertPath = "/etc/certs/client.crt";
         private const string ClientKeyPath = "/etc/certs/client.key";
+        private const int ChunkSize = 64 * 1024;
 
         private readonly HashSet<string> _syncedDirectories = new(StringComparer.OrdinalIgnoreCase);
         private readonly System.Collections.Concurrent.ConcurrentDictionary<string, GrpcChannel> _channels = new(StringComparer.OrdinalIgnoreCase);
@@ -148,10 +149,9 @@ namespace GitHub.Runner.Worker.Handlers
                 await call.RequestStream.WriteAsync(new WriteFileRequest { Path = path });
 
                 var bytes = Encoding.UTF8.GetBytes(content ?? string.Empty);
-                const int chunkSize = 64 * 1024;
-                for (int i = 0; i < bytes.Length; i += chunkSize)
+                for (int i = 0; i < bytes.Length; i += ChunkSize)
                 {
-                    int length = Math.Min(chunkSize, bytes.Length - i);
+                    int length = Math.Min(ChunkSize, bytes.Length - i);
                     var chunk = new byte[length];
                     Array.Copy(bytes, i, chunk, 0, length);
                     await call.RequestStream.WriteAsync(new WriteFileRequest { Chunk = Google.Protobuf.ByteString.CopyFrom(chunk) });

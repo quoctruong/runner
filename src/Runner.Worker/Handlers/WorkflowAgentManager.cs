@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading;
@@ -309,13 +310,12 @@ namespace GitHub.Runner.Worker.Handlers
             var podIP = container?.ContainerIP ?? context.Global.Container?.ContainerIP;
             if (string.IsNullOrEmpty(podIP)) return;
 
-            var tasks = new List<Task>();
-            foreach (var fileCommand in commandExtensions)
+            var tasks = commandExtensions.Select(fileCommand =>
             {
                 var hostPath = Path.Combine(fileCommandDirectory, fileCommand.FilePrefix + fileSuffix);
                 var remotePath = container?.TranslateToContainerPath(hostPath) ?? hostPath;
 
-                tasks.Add(Task.Run(async () =>
+                return Task.Run(async () =>
                 {
                     try
                     {
@@ -333,13 +333,10 @@ namespace GitHub.Runner.Worker.Handlers
                             File.WriteAllBytes(hostPath, Array.Empty<byte>());
                         }
                     }
-                }));
-            }
+                });
+            });
 
-            if (tasks.Count > 0)
-            {
-                await Task.WhenAll(tasks);
-            }
+            await Task.WhenAll(tasks);
         }
 
         public async Task SyncFileToWorkflowPodAsync(IExecutionContext context, string hostPath)

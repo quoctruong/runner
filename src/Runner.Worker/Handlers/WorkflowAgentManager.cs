@@ -184,7 +184,7 @@ namespace GitHub.Runner.Worker.Handlers
             }
         }
 
-        public Task<int> ExecuteAsync(
+        public async Task<int> ExecuteAsync(
             IExecutionContext context,
             ContainerInfo container,
             string workingDirectory,
@@ -197,12 +197,79 @@ namespace GitHub.Runner.Worker.Handlers
             Action<string> onError,
             CancellationToken cancellationToken)
         {
-            throw new NotImplementedException();
+            var podIP = container?.ContainerIP;
+            if (string.IsNullOrEmpty(podIP))
+            {
+                throw new InvalidOperationException("Workflow pod IP is not available.");
+            }
+            context.Debug($"Resolved workflow pod IP: {podIP}");
+
+            var client = GetGrpcClient(podIP);
+            var request = new ExecuteRequest
+            {
+                Command = fileName,
+                Arguments = arguments,
+                WorkingDirectory = workingDirectory,
+                Stdin = standardInInput ?? string.Empty,
+                PrependPath = prependPath ?? string.Empty
+            };
+
+            foreach (var env in environment)
+            {
+                request.Environment.Add(env.Key, env.Value ?? string.Empty);
+            }
+
+            using (var call = client.Execute(request, headers: GetHeaders(), cancellationToken: cancellationToken))
+            {
+                while (await call.ResponseStream.MoveNext(cancellationToken))
+                {
+                    var response = call.ResponseStream.Current;
+                    if (response.Stream == ExecuteResponse.Types.StreamType.Stdout)
+                    {
+                        var data = response.Data;
+                        if (data != null)
+                        {
+                            onOutput?.Invoke(data.TrimEnd('\r', '\n'));
+                        }
+                    }
+                    else if (response.Stream == ExecuteResponse.Types.StreamType.Stderr)
+                    {
+                        var data = response.Data;
+                        if (data != null)
+                        {
+                            onError?.Invoke(data.TrimEnd('\r', '\n'));
+                        }
+                    }
+                    else if (response.Stream == ExecuteResponse.Types.StreamType.ExitCode)
+                    {
+                        return response.ExitCode;
+                    }
+                }
+            }
+            throw new InvalidOperationException("Workflow agent terminated stream connection without returning exit code.");
         }
 
-        public Task SyncWebhookPayloadAsync(IExecutionContext context, string localFilePath, string content)
+        public async Task SyncWebhookPayloadAsync(IExecutionContext context, string localFilePath, string content)
         {
-            throw new NotImplementedException();
+            if (!FeatureManager.IsNoSharedVolumeEnabled()) return;
+
+            var podIP = context.Global.Container?.ContainerIP;
+            if (!string.IsNullOrEmpty(podIP))
+            {
+                try
+                {
+                    var containerPath = "/github/workflow/event.json";
+                    context.Debug($"Syncing event payload to workflow pod: {containerPath}");
+                    using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(content ?? string.Empty)))
+                    {
+                        await WriteFileAsync(podIP, containerPath, stream);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    context.Warning($"Failed to upload event payload to workflow pod: {ex.Message}");
+                }
+            }
         }
 
         public void InitializeFileCommand(IExecutionContext context, ContainerInfo container, string hostPath, string contextName)

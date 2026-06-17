@@ -23,6 +23,27 @@ namespace GitHub.Runner.Worker.Container
     {
         private const string DefaultWorkflowAgentImage = "us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/workflow-agent:latest";
 
+        private IKubernetes _k8sClient;
+        private string _namespace;
+        private readonly object _lock = new object();
+
+        private (IKubernetes Client, string Namespace) GetK8sClient()
+        {
+            if (_k8sClient == null)
+            {
+                lock (_lock)
+                {
+                    if (_k8sClient == null)
+                    {
+                        var k8sConfig = KubernetesClientConfiguration.InClusterConfig();
+                        _k8sClient = new Kubernetes(k8sConfig);
+                        _namespace = k8sConfig.Namespace ?? "default";
+                    }
+                }
+            }
+            return (_k8sClient, _namespace);
+        }
+
         public async Task PrepareJobAsync(IExecutionContext context, List<ContainerInfo> containers)
         {
             Trace.Entering();
@@ -46,10 +67,8 @@ namespace GitHub.Runner.Worker.Container
             jobContainer.ContainerId = podName;
             context.JobContext.Container["id"] = new StringContextData(podName);
 
-            // Initialize official client with InCluster configuration
-            var k8sConfig = KubernetesClientConfiguration.InClusterConfig();
-            var client = new Kubernetes(k8sConfig);
-            var namespaceVal = k8sConfig.Namespace ?? "default";
+            // Retrieve cached Kubernetes client
+            var (client, namespaceVal) = GetK8sClient();
 
             // Build Pod object
             var pod = BuildPodSpec(context, podName, jobContainer);
@@ -253,7 +272,7 @@ namespace GitHub.Runner.Worker.Container
             };
         }
 
-        private async Task<string> WaitForPodIPAsync(Kubernetes client, string podName, string namespaceVal, IExecutionContext context)
+        private async Task<string> WaitForPodIPAsync(IKubernetes client, string podName, string namespaceVal, IExecutionContext context)
         {
             string lastPhase = null;
             var timeout = DateTime.UtcNow.AddMinutes(5);
@@ -317,9 +336,8 @@ namespace GitHub.Runner.Worker.Container
 
             try
             {
-                var k8sConfig = KubernetesClientConfiguration.InClusterConfig();
-                var client = new Kubernetes(k8sConfig);
-                var namespaceVal = k8sConfig.Namespace ?? "default";
+                // Retrieve cached Kubernetes client
+                var (client, namespaceVal) = GetK8sClient();
 
                 await ExecuteK8sRequestAsync(context, async () =>
                 {

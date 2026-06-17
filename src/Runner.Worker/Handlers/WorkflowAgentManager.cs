@@ -309,27 +309,36 @@ namespace GitHub.Runner.Worker.Handlers
             var podIP = container?.ContainerIP ?? context.Global.Container?.ContainerIP;
             if (string.IsNullOrEmpty(podIP)) return;
 
+            var tasks = new List<Task>();
             foreach (var fileCommand in commandExtensions)
             {
                 var hostPath = Path.Combine(fileCommandDirectory, fileCommand.FilePrefix + fileSuffix);
                 var remotePath = container?.TranslateToContainerPath(hostPath) ?? hostPath;
 
-                try
+                tasks.Add(Task.Run(async () =>
                 {
-                    context.Debug($"Syncing file command '{fileCommand.ContextName}' from remote '{remotePath}' -> local '{hostPath}'");
-                    using (var localFileStream = new FileStream(hostPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                    try
                     {
-                        await ReadFileAsync(podIP, remotePath, localFileStream);
+                        context.Debug($"Syncing file command '{fileCommand.ContextName}' from remote '{remotePath}' -> local '{hostPath}'");
+                        using (var localFileStream = new FileStream(hostPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                        {
+                            await ReadFileAsync(podIP, remotePath, localFileStream);
+                        }
                     }
-                }
-                catch (Exception ex)
-                {
-                    context.Debug($"No remote file command output retrieved for '{fileCommand.ContextName}': {ex.Message}");
-                    if (!File.Exists(hostPath))
+                    catch (Exception ex)
                     {
-                        File.WriteAllBytes(hostPath, Array.Empty<byte>());
+                        context.Debug($"No remote file command output retrieved for '{fileCommand.ContextName}': {ex.Message}");
+                        if (!File.Exists(hostPath))
+                        {
+                            File.WriteAllBytes(hostPath, Array.Empty<byte>());
+                        }
                     }
-                }
+                }));
+            }
+
+            if (tasks.Count > 0)
+            {
+                await Task.WhenAll(tasks);
             }
         }
 

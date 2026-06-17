@@ -152,9 +152,7 @@ namespace GitHub.Runner.Worker.Handlers
                 for (int i = 0; i < bytes.Length; i += ChunkSize)
                 {
                     int length = Math.Min(ChunkSize, bytes.Length - i);
-                    var chunk = new byte[length];
-                    Array.Copy(bytes, i, chunk, 0, length);
-                    await call.RequestStream.WriteAsync(new WriteFileRequest { Chunk = Google.Protobuf.ByteString.CopyFrom(chunk) });
+                    await call.RequestStream.WriteAsync(new WriteFileRequest { Chunk = Google.Protobuf.ByteString.CopyFrom(bytes, i, length) });
                 }
 
                 await call.RequestStream.CompleteAsync();

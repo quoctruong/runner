@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using GitHub.DistributedTask.ObjectTemplating;
@@ -158,7 +158,7 @@ namespace GitHub.Runner.Worker
             {
                 // Make sure the required container is already created
                 // Container hooks do not necessarily set 'ContainerId'
-                if (!FeatureManager.IsContainerHooksEnabled(ExecutionContext.Global.Variables))
+                if (!FeatureManager.IsContainerHooksEnabled(ExecutionContext.Global.Variables) && !FeatureManager.IsNoSharedVolumeEnabled())
                 {
                     ArgUtil.NotNullOrEmpty(ExecutionContext.Global.Container.ContainerId, nameof(ExecutionContext.Global.Container.ContainerId));
                 }

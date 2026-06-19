@@ -135,6 +135,10 @@ namespace GitHub.Runner.Worker.Handlers
         {
             var headers = new Metadata();
             var token = Environment.GetEnvironmentVariable(Constants.Variables.Actions.SecurityToken);
+            if (string.IsNullOrEmpty(token) && File.Exists("/etc/certs/token"))
+            {
+                token = File.ReadAllText("/etc/certs/token").Trim();
+            }
             if (!string.IsNullOrEmpty(token))
             {
                 headers.Add("x-actions-runner-token", token);

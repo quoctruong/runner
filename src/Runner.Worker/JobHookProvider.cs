@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
@@ -79,7 +79,8 @@ namespace GitHub.Runner.Worker
 
             // Setup file commands
             var fileCommandManager = HostContext.CreateService<IFileCommandManager>();
-            fileCommandManager.InitializeFiles(executionContext, null);
+            var targetContainer = FeatureManager.IsNoSharedVolumeEnabled() ? executionContext.Global.Container : null;
+            fileCommandManager.InitializeFiles(executionContext, targetContainer);
 
             // Run the step and process the file commands
             try

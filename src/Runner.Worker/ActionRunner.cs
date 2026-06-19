@@ -169,7 +169,8 @@ namespace GitHub.Runner.Worker
 
             // Setup File Command Manager
             var fileCommandManager = HostContext.CreateService<IFileCommandManager>();
-            fileCommandManager.InitializeFiles(ExecutionContext, null);
+            var targetContainer = FeatureManager.IsNoSharedVolumeEnabled() ? ExecutionContext.Global.Container : null;
+            fileCommandManager.InitializeFiles(ExecutionContext, targetContainer);
 
             // Load the inputs.
             ExecutionContext.Debug("Loading inputs");
@@ -271,6 +272,12 @@ namespace GitHub.Runner.Worker
 
             // Print out action details and log telemetry
             handler.PrepareExecution(Stage);
+
+            if (FeatureManager.IsNoSharedVolumeEnabled() && definition != null && !string.IsNullOrEmpty(definition.Directory) && System.IO.Directory.Exists(definition.Directory))
+            {
+                var workflowAgentManager = HostContext.GetService<IWorkflowAgentManager>();
+                await workflowAgentManager.SyncDirectoryToWorkflowPodAsync(ExecutionContext, definition.Directory);
+            }
 
             // Run the task.
             try

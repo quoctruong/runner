@@ -147,16 +147,24 @@ namespace GitHub.Runner.Worker.Handlers
             var client = GetGrpcClient(podIP);
             using (var call = client.WriteFile(headers: GetHeaders()))
             {
-                await call.RequestStream.WriteAsync(new WriteFileRequest { Path = path, ExtractTar = extractTar });
-
-                var buffer = new byte[ChunkSize];
-                int bytesRead;
-                while ((bytesRead = await content.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                try
                 {
-                    await call.RequestStream.WriteAsync(new WriteFileRequest { Chunk = Google.Protobuf.ByteString.CopyFrom(buffer, 0, bytesRead) });
+                    await call.RequestStream.WriteAsync(new WriteFileRequest { Path = path, ExtractTar = extractTar });
+
+                    var buffer = new byte[ChunkSize];
+                    int bytesRead;
+                    while ((bytesRead = await content.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                    {
+                        await call.RequestStream.WriteAsync(new WriteFileRequest { Chunk = Google.Protobuf.ByteString.CopyFrom(buffer, 0, bytesRead) });
+                    }
+
+                    await call.RequestStream.CompleteAsync();
+                }
+                catch (Grpc.Core.RpcException ex) when (ex.StatusCode == Grpc.Core.StatusCode.OK)
+                {
+                    // Server finished processing early (e.g. tar extraction reached EOF marker) and closed stream with OK status.
                 }
 
-                await call.RequestStream.CompleteAsync();
                 var response = await call.ResponseAsync;
                 if (response == null || !response.Success)
                 {

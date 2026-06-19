@@ -357,13 +357,15 @@ namespace GitHub.Runner.Worker.Handlers
         {
             if (!FeatureManager.IsNoSharedVolumeEnabled()) return;
 
-            var podIP = context.Global.Container?.ContainerIP;
+            var targetContainer = context.Global.Container;
+            var podIP = targetContainer?.ContainerIP;
             if (string.IsNullOrEmpty(podIP) || string.IsNullOrEmpty(hostPath) || !File.Exists(hostPath)) return;
 
-            context.Debug($"Syncing file to workflow pod: {hostPath}");
+            var remotePath = targetContainer?.TranslateToContainerPath(hostPath) ?? hostPath;
+            context.Debug($"Syncing file to workflow pod: {hostPath} -> {remotePath}");
             using (var stream = File.OpenRead(hostPath))
             {
-                await WriteFileAsync(podIP, hostPath, stream);
+                await WriteFileAsync(podIP, remotePath, stream);
             }
         }
 

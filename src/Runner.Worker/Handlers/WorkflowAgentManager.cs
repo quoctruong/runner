@@ -293,10 +293,11 @@ namespace GitHub.Runner.Worker.Handlers
         {
             if (!FeatureManager.IsNoSharedVolumeEnabled()) return;
 
-            var podIP = container?.ContainerIP ?? context.Global.Container?.ContainerIP;
+            var targetContainer = container ?? context.Global.Container;
+            var podIP = targetContainer?.ContainerIP;
             if (string.IsNullOrEmpty(podIP)) return;
 
-            var containerPath = container?.TranslateToContainerPath(hostPath) ?? hostPath;
+            var containerPath = targetContainer?.TranslateToContainerPath(hostPath) ?? hostPath;
             context.Debug($"Initializing file command '{contextName}' at '{containerPath}' on pod IP '{podIP}'");
 
             Task.Run(async () =>
@@ -319,13 +320,14 @@ namespace GitHub.Runner.Worker.Handlers
         {
             if (!FeatureManager.IsNoSharedVolumeEnabled() || commandExtensions == null) return;
 
-            var podIP = container?.ContainerIP ?? context.Global.Container?.ContainerIP;
+            var targetContainer = container ?? context.Global.Container;
+            var podIP = targetContainer?.ContainerIP;
             if (string.IsNullOrEmpty(podIP)) return;
 
             var tasks = commandExtensions.Select(fileCommand =>
             {
                 var hostPath = Path.Combine(fileCommandDirectory, fileCommand.FilePrefix + fileSuffix);
-                var remotePath = container?.TranslateToContainerPath(hostPath) ?? hostPath;
+                var remotePath = targetContainer?.TranslateToContainerPath(hostPath) ?? hostPath;
 
                 return Task.Run(async () =>
                 {
